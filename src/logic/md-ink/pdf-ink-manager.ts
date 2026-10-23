@@ -216,6 +216,9 @@ function createPdfPill(
 			other.classList.toggle('is-active', other.dataset.mdInkTool === activeTool);
 		}
 		pill.classList.toggle('is-live', activeTool !== 'pan');
+		if (typeof document !== 'undefined' && document.body) {
+			document.body.classList.toggle('bimo-md-ink-writing-active', activeTool !== 'pan');
+		}
 		const styleState = getStyleState();
 		const colour = styleState.colour === 'currentColor' ? 'var(--text-normal)' : styleState.colour;
 		pill.style.setProperty('--bimo-md-ink-colour', colour);

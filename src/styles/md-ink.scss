@@ -34,6 +34,17 @@ body.bimo-md-ink-writing-active .cm-editor,
 	touch-action: none !important;
 }
 
+/* Prevent mobile pull-down overscroll and swipe-down gestures when writing is active */
+body.bimo-md-ink-writing-active .cm-scroller,
+body.bimo-md-ink-writing-active .workspace-leaf.mod-active,
+body.bimo-md-ink-writing-active .workspace-leaf-content,
+body.bimo-md-ink-writing-active .view-content,
+.cm-editor.bimo-md-ink-writing-active,
+.bimo-md-ink-layer:not([data-tool='pan']) {
+	overscroll-behavior-y: none !important;
+	overscroll-behavior: none !important;
+}
+
 .cm-editor.bimo-md-ink-writing-active .cm-content {
 	user-select: none !important;
 	-webkit-user-select: none !important;

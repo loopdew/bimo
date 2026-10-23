@@ -72,12 +72,11 @@ export class MdInkController {
 		const self = this;
 		proto.trigger = function (this: any, eventName: string, ...args: any[]) {
 			try {
-				if (eventName === 'swipe') {
-					const data = args[0];
-					if (data && data.direction === 'x') {
-						if (self.tool !== 'pan') {
-							return this;
-						}
+				// When actively in any writing or drawing tool (not pan), block ALL swipe gestures
+				// (horizontal edge swipes opening sidebars, vertical pull-down opening command palette/quick action, etc.)
+				if (eventName === 'swipe' || eventName === 'pull-down' || eventName === 'quick-action') {
+					if (self.tool !== 'pan') {
+						return this;
 					}
 				}
 			} catch {
@@ -86,6 +85,65 @@ export class MdInkController {
 			return originalTrigger.apply(this, [eventName, ...args]);
 		};
 		proto.trigger.__bimo_swipe_guard = true;
+
+		// Intercept top-to-bottom drag gestures in capture phase
+		// so Obsidian's pull-down Quick Action visual indicator / gesture engine never engages.
+		if (typeof window !== 'undefined') {
+			let touchStartY = 0;
+			let touchStartX = 0;
+			let isTopSwipeCandidate = false;
+
+			const onTouchStart = (event: TouchEvent) => {
+				if (self.tool === 'pan') {
+					isTopSwipeCandidate = false;
+					return;
+				}
+				if (event.touches.length !== 1) {
+					isTopSwipeCandidate = false;
+					return;
+				}
+				const touch = event.touches[0];
+				touchStartY = touch.clientY;
+				touchStartX = touch.clientX;
+
+				const target = event.target as HTMLElement | null;
+				if (target?.closest('button, input, select, textarea, .bimo-md-ink-pill, .bimo-magic-diary-banner, .bimo-magic-diary-reply')) {
+					isTopSwipeCandidate = false;
+					return;
+				}
+
+				// If starting in the top 140px of the screen or inside view-header/leaf header
+				if (touchStartY < 140 || target?.closest('.view-header, .workspace-leaf-header, .view-actions')) {
+					isTopSwipeCandidate = true;
+				} else {
+					isTopSwipeCandidate = false;
+				}
+			};
+
+			const onTouchMove = (event: TouchEvent) => {
+				if (!isTopSwipeCandidate || self.tool === 'pan') return;
+				if (event.touches.length !== 1) return;
+				const touch = event.touches[0];
+				const dy = touch.clientY - touchStartY;
+				const dx = touch.clientX - touchStartX;
+
+				// If dragging downwards from top (dy > 12) dominantly over horizontal movement
+				if (dy > 12 && Math.abs(dy) > Math.abs(dx)) {
+					event.preventDefault();
+					event.stopPropagation();
+					event.stopImmediatePropagation();
+				}
+			};
+
+			const onTouchEnd = () => {
+				isTopSwipeCandidate = false;
+			};
+
+			window.addEventListener('touchstart', onTouchStart, { capture: true, passive: false });
+			window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+			window.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+			window.addEventListener('touchcancel', onTouchEnd, { capture: true, passive: true });
+		}
 	}
 
 	/** Record that `from` became `to`, and keep the move promise for later reads. */
@@ -162,6 +220,9 @@ export class MdInkController {
 	/** Change the tool globally and on every mounted note and PDF at once. */
 	setTool(tool: MdInkTool): void {
 		this.tool = tool;
+		if (typeof document !== 'undefined' && document.body) {
+			document.body.classList.toggle('bimo-md-ink-writing-active', tool !== 'pan');
+		}
 		this.setToolEverywhere(tool);
 		this.pdfSink?.setTool(tool);
 	}
