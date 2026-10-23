@@ -112,6 +112,9 @@ export function migrateOutdatedSettings(raw: Record<string, unknown>): PluginSet
 	if (typeof settings.mdInkMouseDrawing !== 'boolean') {
 		settings.mdInkMouseDrawing = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkMouseDrawing;
 	}
+	if (typeof settings.mdInkFingerDraws !== 'boolean') {
+		settings.mdInkFingerDraws = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkFingerDraws;
+	}
 	// One-time correction. The first release shipped `false` as the default, so
 	// every existing data.json carries a `false` nobody chose. Flip it once and
 	// record that the value belongs to the user from then on.

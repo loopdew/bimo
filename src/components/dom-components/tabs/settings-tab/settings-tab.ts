@@ -345,6 +345,17 @@ export class MySettingsTab extends PluginSettingTab {
 				}));
 
 		new Setting(container)
+			.setName(t('Draw with a finger'))
+			.setDesc(t('Off by default on tablets: a finger scrolls the note and the stylus draws. Turn this on if you have no stylus at all.'))
+			.addToggle((toggle) => toggle
+				.setValue(plugin.settings.mdInkFingerDraws)
+				.onChange(async (value) => {
+					plugin.settings.mdInkFingerDraws = value;
+					plugin.mdInk.refreshOptions({ fingerDraws: value });
+					await plugin.saveSettings();
+				}));
+
+		new Setting(container)
 			.setName(t('Paper'))
 			.setDesc(t('A guide drawn under the ink for this note. It is decoration only — it never enters the Markdown file.'))
 			.addDropdown((dropdown) => dropdown

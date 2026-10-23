@@ -220,6 +220,7 @@ export function createMdInkExtension(plugin: MyPlugin): Extension {
 						size: plugin.settings.mdInkSize,
 						colour: plugin.settings.mdInkColour,
 						mouseDrawing: plugin.settings.mdInkMouseDrawing,
+						fingerDraws: plugin.settings.mdInkFingerDraws,
 						paper: plugin.settings.mdInkPaper,
 						eraserRadius: plugin.settings.mdInkEraserRadius,
 						shapeSnap: plugin.settings.mdInkShapeSnap,

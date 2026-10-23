@@ -1,4 +1,4 @@
-import { App, Editor, Notice, TFile, loadPdfJs } from 'obsidian';
+import { App, Editor, Notice, Platform, TFile, loadPdfJs } from 'obsidian';
 import InkPlugin from 'src/main';
 import { t } from 'src/i18n';
 import { createNewWritingFile } from 'src/commands/create-new-writing-file';
@@ -20,7 +20,25 @@ const PDF_PAGE_FOLDER = 'Ink/PDF';
  * that printed body text stays legible when zoomed in, without the 5 MB files a
  * 3–4× render would produce.
  */
-const RENDER_SCALE = 2;
+const RENDER_SCALE_DESKTOP = 2;
+
+/**
+ * Mobile WebViews cap a canvas near 16 MB of backing store. A 2× A4 page is
+ * ~7.8 MB as RGBA, so rendering three pages in a row is enough to be killed on
+ * Android. 1.5× (~4.4 MB) stays legible at normal zoom and roughly halves it.
+ */
+const RENDER_SCALE_MOBILE = 1.5;
+
+/**
+ * Scale for the current platform.
+ *
+ * Deliberately a function, not a constant: the value is baked into the cached
+ * page-image filename, so desktop keeps its existing 2× cache while a tablet
+ * writes its own 1.5× files beside them instead of silently overwriting.
+ */
+function renderScale(): number {
+	return Platform.isMobile ? RENDER_SCALE_MOBILE : RENDER_SCALE_DESKTOP;
+}
 
 /** Minimal shape of the objects Obsidian's `loadPdfJs()` hands back. */
 interface PdfDocumentLike {
@@ -68,7 +86,7 @@ async function renderPage(
 ): Promise<RenderedPage | null> {
 	try {
 		const page = await doc.getPage(pageNumber);
-		const viewport = page.getViewport({ scale: RENDER_SCALE });
+		const viewport = page.getViewport({ scale: renderScale() });
 		const canvas = document.createElement('canvas');
 		canvas.width = Math.max(1, Math.floor(viewport.width));
 		canvas.height = Math.max(1, Math.floor(viewport.height));
@@ -187,7 +205,7 @@ function pageImagePath(
 	// annotating page 3 twice — once whole, once as a PDF++ rectangle — would
 	// silently reuse whichever image was written first.
 	const crop = rect ? `-r${stablePathHash(rect.join(','))}` : '';
-	return `${pdfCacheFolder(inkRoot, pdfFile)}/p${pageNumber}@${RENDER_SCALE}x${crop}.png`;
+	return `${pdfCacheFolder(inkRoot, pdfFile)}/p${pageNumber}@${renderScale()}x${crop}.png`;
 }
 
 

@@ -337,6 +337,7 @@ export class PdfInkManager {
 				size: this.plugin.settings.mdInkSize,
 				colour: this.plugin.settings.mdInkColour,
 				mouseDrawing: this.plugin.settings.mdInkMouseDrawing,
+				fingerDraws: this.plugin.settings.mdInkFingerDraws,
 				eraserRadius: this.plugin.settings.mdInkEraserRadius,
 				shapeSnap: this.plugin.settings.mdInkShapeSnap,
 				tool: this.plugin.mdInk.tool,

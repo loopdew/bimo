@@ -1,4 +1,5 @@
-import type { App } from 'obsidian';
+import { Notice, type App } from 'obsidian';
+import { t } from 'src/i18n';
 import { createEmptyMdInkDocument, type MdInkDocument } from './types';
 
 ///////////////////////////
@@ -78,7 +79,13 @@ export function serializeMdInkDocument(doc: MdInkDocument): string {
 	});
 }
 
+/** Minimum gap between "could not save" notices, in ms. */
+const SAVE_ERROR_NOTICE_MS = 30_000;
+
 export class MdInkStorage {
+	/** Last time a save failure was surfaced, so one broken state reports once. */
+	private lastSaveErrorAt = 0;
+
 	constructor(private readonly app: App) {}
 
 	private get adapter() {
@@ -109,6 +116,14 @@ export class MdInkStorage {
 			await this.adapter.write(path, serializeMdInkDocument(doc));
 		} catch (error) {
 			console.warn('[bimo] md-ink save failed', doc.notePath, error);
+			// Silent failure here means the user draws, sees the ink on screen, and
+			// finds it gone on reopen — most likely on mobile, where the vault
+			// adapter writes into a sandboxed directory. Report it, but throttled so
+			// a persistently failing autosave does not stack a notice per stroke.
+			if (Date.now() - this.lastSaveErrorAt > SAVE_ERROR_NOTICE_MS) {
+				this.lastSaveErrorAt = Date.now();
+				new Notice(t('Ink could not be saved. Check that the vault is writable.'), 8000);
+			}
 		}
 	}
 

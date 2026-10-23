@@ -28,11 +28,17 @@ function encodeUtf8TextToBase64(text: string): string {
 		return Buffer.from(text, 'utf8').toString('base64');
 	}
 	const bytes = new TextEncoder().encode(text);
-	let binary = '';
-	for (const byte of bytes) {
-		binary += String.fromCharCode(byte);
+	// Chunked rather than a per-byte `binary += String.fromCharCode(byte)`.
+	// That loop is O(n²) on engines that copy the string each time, and a writing
+	// SVG carrying a full page of strokes is several megabytes — the difference
+	// is imperceptible on desktop and a visible freeze on a tablet.
+	// 8 KB keeps the spread argument list well under any engine's stack limit.
+	const CHUNK = 0x2000;
+	const parts: string[] = [];
+	for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+		parts.push(String.fromCharCode(...bytes.subarray(offset, offset + CHUNK)));
 	}
-	return btoa(binary);
+	return btoa(parts.join(''));
 }
 
 /**

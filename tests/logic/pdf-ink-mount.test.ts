@@ -16,6 +16,7 @@ const OPTIONS = {
 	size: 4,
 	colour: 'currentColor',
 	mouseDrawing: true,
+	fingerDraws: false,
 	eraserRadius: 14,
 	shapeSnap: true,
 	tool: 'pen' as const,

@@ -96,6 +96,11 @@ export interface PluginSettings_0_5_0 extends PluginSettings_0_4_0 {
 	mdInkColour: string,
 	/** When false, only a stylus draws — a mouse keeps selecting text. */
 	mdInkMouseDrawing: boolean,
+	/**
+	 * When true a finger draws too, which takes the touch stream away from the
+	 * editor. Off keeps a one-finger drag scrolling the note — what a tablet expects.
+	 */
+	mdInkFingerDraws: boolean,
 	/** Set once the shipped-default correction has run; afterwards the value is the user's. */
 	mdInkMouseDrawingMigrated?: boolean,
 	/** Paper texture drawn under the ink: none, ruled, grid or dots. */
@@ -166,6 +171,9 @@ export const DEFAULT_PLUGIN_SETTINGS_0_5_0: PluginSettings_0_5_0 = {
 	// A desktop user's first attempt is a mouse. Pen-only as the default made
 	// the whole feature look dead on arrival.
 	mdInkMouseDrawing: true,
+	// Deliberately the opposite of the mouse default: on a tablet the finger is
+	// the scroll gesture and the stylus is the pen.
+	mdInkFingerDraws: false,
 	mdInkPaper: 'none',
 	mdInkEraserRadius: 14,
 	mdInkShapeSnap: true,

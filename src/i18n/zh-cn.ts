@@ -601,6 +601,11 @@ export const ZH_CN: Record<string, string> = {
 	'Draw with a mouse': '允许鼠标书写',
 	'Off by default: a pen draws, a mouse keeps selecting text. Turn this on if you have no stylus.':
 		'默认关闭：笔能写，鼠标仍然选文字。没有手写笔时再打开。',
+	'Draw with a finger': '允许手指书写',
+	'Off by default on tablets: a finger scrolls the note and the stylus draws. Turn this on if you have no stylus at all.':
+		'平板默认关闭：手指用来滚动笔记，手写笔用来写字。完全没有触控笔时才需要打开。',
+	'Ink could not be saved. Check that the vault is writable.':
+		'手写墨迹保存失败，请检查笔记库目录是否可写。',
 	'Paper': '纸张',
 	'A guide drawn under the ink for this note. It is decoration only — it never enters the Markdown file.':
 		'铺在笔迹下方的辅助线，仅作视觉参考，不会写进 Markdown 文件。',

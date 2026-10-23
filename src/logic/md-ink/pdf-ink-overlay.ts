@@ -35,6 +35,11 @@ export interface PdfInkOverlayOptions {
 	size: number;
 	colour: string;
 	mouseDrawing: boolean;
+	/**
+	 * A finger draws too. Off (default) leaves one-finger drag scrolling the PDF
+	 * and reserves drawing for a stylus.
+	 */
+	fingerDraws: boolean;
 	eraserRadius: number;
 	shapeSnap: boolean;
 	tool: 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'pan';
@@ -262,6 +267,8 @@ export class PdfInkOverlay {
 		layer.svg.style.pointerEvents = active ? 'auto' : 'none';
 		layer.svg.style.cursor = active ? 'crosshair' : 'default';
 		layer.svg.dataset.tool = this.options.tool;
+		// CSS keys off this: only finger drawing may claim the touch stream.
+		layer.svg.dataset.fingerDraws = this.options.fingerDraws ? 'true' : 'false';
 		if (!active) layer.reticle.style.display = 'none';
 	}
 
@@ -345,6 +352,12 @@ export class PdfInkOverlay {
 			if (event.button !== 0) return;
 			if (event.pointerType === 'mouse' && !this.options.mouseDrawing) {
 				explainMouseDrawingDisabled();
+				return;
+			}
+
+			// A finger scrolls the PDF unless the user opted into finger drawing.
+			// Returning without preventDefault keeps one-finger page scrolling alive.
+			if (event.pointerType === 'touch' && !this.options.fingerDraws) {
 				return;
 			}
 

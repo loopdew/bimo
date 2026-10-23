@@ -17,6 +17,13 @@
 	pointer-events: none;
 	user-select: none;
 	-webkit-user-select: none;
+	/* Scroll and pinch stay available while the layer is inert. The layer only
+	   claims the touch stream when a tool is active AND finger drawing is on —
+	   otherwise a palm or finger on a tablet could never scroll the note. */
+	touch-action: pan-y pinch-zoom;
+}
+
+.bimo-md-ink-layer[data-finger-draws='true'] {
 	touch-action: none;
 }
 
@@ -282,6 +289,12 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 .bimo-pdf-ink-svg {
 	user-select: none;
 	-webkit-user-select: none;
+	/* Same rule as the note layer: a finger scrolls the PDF unless finger
+	   drawing is on, so the page must not claim the touch stream by default. */
+	touch-action: pan-y pinch-zoom;
+}
+
+.bimo-pdf-ink-svg[data-finger-draws='true'] {
 	touch-action: none;
 }
 

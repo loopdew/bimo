@@ -69,6 +69,11 @@ export interface MdInkOverlayOptions {
 	colour: string;
 	/** Mouse/trackpad draws too. Off means pen-only, so a mouse can still select text. */
 	mouseDrawing: boolean;
+	/**
+	 * A finger draws too. Off (default) leaves one-finger drag scrolling the note
+	 * and reserves drawing for a stylus — what an Android tablet expects.
+	 */
+	fingerDraws: boolean;
 	paper: MdInkPaper;
 	/** Eraser radius in CSS px. */
 	eraserRadius: number;
@@ -766,6 +771,9 @@ export class MdInkOverlay {
 		const tool = this.getTool();
 		this.layer.style.pointerEvents = tool === 'pan' ? 'none' : 'auto';
 		this.layer.dataset.tool = tool;
+		// CSS keys off this: drawing fingers means claiming the touch stream, so
+		// only then may the layer set `touch-action: none`.
+		this.layer.dataset.fingerDraws = this.options.fingerDraws ? 'true' : 'false';
 		this.syncPill();
 	}
 
@@ -774,6 +782,20 @@ export class MdInkOverlay {
 		if (this.getTool() === 'pan') return;
 		if (event.pointerType === 'mouse' && !this.options.mouseDrawing && this.getTool() !== 'lasso') {
 			explainMouseDrawingDisabled();
+			return;
+		}
+
+		// A finger is the scroll gesture unless the user opted into finger drawing.
+		// Returning without preventDefault lets the browser pan the note instead of
+		// leaving a line across it.
+		if (event.pointerType === 'touch' && !this.options.fingerDraws && this.getTool() !== 'lasso') {
+			return;
+		}
+
+		// A second finger means pinch or two-finger scroll: drop the stroke in
+		// progress so zooming out of a mis-drawn mark leaves no stray ink.
+		if (this.activePointerId !== null && this.activePointerId !== event.pointerId) {
+			this.abortActiveStroke();
 			return;
 		}
 
@@ -948,6 +970,19 @@ export class MdInkOverlay {
 
 	private onPointerCancel(event: PointerEvent): void {
 		if (event.pointerId !== this.activePointerId) return;
+		this.abortActiveStroke();
+	}
+
+	/**
+	 * Discard the stroke in progress without committing it.
+	 *
+	 * Used when a gesture turns into a pinch: the ink drawn during the first
+	 * frames of an accidental touch must not survive the zoom.
+	 */
+	private abortActiveStroke(): void {
+		if (this.activePointerId !== null) {
+			this.layer.releasePointerCapture?.(this.activePointerId);
+		}
 		this.activeStroke = null;
 		this.livePath.setAttribute('d', '');
 		this.lassoStart = null;
