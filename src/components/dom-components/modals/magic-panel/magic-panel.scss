@@ -1,0 +1,135 @@
+// A handwritten page, not a chat window. The warm paper tone and the brush-ish
+// font stack are what make a model answer read as margin notes.
+.ddc_ink_magic-panel {
+	--ddc-magic-paper: #fbf7ec;
+	--ddc-magic-ink: #2b241c;
+	--ddc-magic-rule: #e4dcc8;
+
+	background-color: var(--ddc-magic-paper);
+	background-image:
+		// faint horizontal ruling, like a notebook page
+		repeating-linear-gradient(
+			to bottom,
+			transparent 0,
+			transparent 31px,
+			var(--ddc-magic-rule) 31px,
+			var(--ddc-magic-rule) 32px
+		);
+}
+
+.theme-dark .ddc_ink_magic-panel {
+	--ddc-magic-paper: #1b1814;
+	--ddc-magic-ink: #e8e1d4;
+	--ddc-magic-rule: #2c2721;
+}
+
+.ddc_ink_magic-panel .modal-title {
+	color: var(--ddc-magic-ink);
+	font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', '楷体', 'LXGW WenKai', serif;
+	letter-spacing: 0.04em;
+}
+
+.ddc_ink_magic-panel__content {
+	display: flex;
+	flex-direction: column;
+	gap: 0.7em;
+	min-height: 20em;
+	color: var(--ddc-magic-ink);
+	font-family: 'Kaiti SC', 'STKaiti', 'KaiTi', '楷体', 'LXGW WenKai', serif;
+}
+
+.ddc_ink_magic-panel__log {
+	display: flex;
+	flex-direction: column;
+	gap: 0.55em;
+	max-height: 46vh;
+	min-height: 14em;
+	overflow-y: auto;
+	padding: 0.2em 0.1em 0.6em;
+}
+
+.ddc_ink_magic-panel__bubble {
+	max-width: 92%;
+	padding: 0.5em 0.75em;
+	border-radius: 12px;
+	font-size: 1.02em;
+	line-height: 1.75;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.ddc_ink_magic-panel__bubble--user {
+	align-self: flex-end;
+	background-color: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+	border-bottom-right-radius: 4px;
+}
+
+.ddc_ink_magic-panel__bubble--assistant {
+	align-self: flex-start;
+	background-color: color-mix(in srgb, var(--ddc-magic-ink) 6%, transparent);
+	border-bottom-left-radius: 4px;
+}
+
+.ddc_ink_magic-panel__bubble--hint {
+	opacity: 0.62;
+	font-style: italic;
+}
+
+.ddc_ink_magic-panel__bubble--error {
+	color: var(--text-error);
+}
+
+// Blinking caret while the reply is being "written".
+.ddc_ink_magic-panel__bubble--writing::after {
+	content: '';
+	display: inline-block;
+	width: 0.5em;
+	height: 1.05em;
+	margin-left: 0.1em;
+	vertical-align: -0.15em;
+	background-color: currentColor;
+	opacity: 0.55;
+	animation: ddc_ink_magic-caret 0.9s steps(2, start) infinite;
+}
+
+@keyframes ddc_ink_magic-caret {
+	0%, 100% { opacity: 0.55; }
+	50% { opacity: 0; }
+}
+
+.ddc_ink_magic-panel__composer {
+	display: flex;
+	flex-direction: column;
+	gap: 0.45em;
+	margin-top: auto;
+}
+
+.ddc_ink_magic-panel__input {
+	width: 100%;
+	box-sizing: border-box;
+	resize: vertical;
+	padding: 0.55em 0.7em;
+
+	border: 1px solid var(--ddc-magic-rule);
+	border-radius: 10px;
+	background-color: color-mix(in srgb, var(--ddc-magic-paper) 80%, white 20%);
+	color: var(--ddc-magic-ink);
+	font-family: inherit;
+	font-size: 1em;
+	line-height: 1.6;
+
+	&:focus {
+		outline: none;
+		border-color: var(--interactive-accent);
+	}
+
+	&::placeholder {
+		color: color-mix(in srgb, var(--ddc-magic-ink) 45%, transparent);
+	}
+}
+
+.ddc_ink_magic-panel__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5em;
+}

@@ -1,0 +1,18 @@
+import { TFile } from "obsidian"
+import InkPlugin from "src/main"
+import { InkFileData_v1 } from "src/components/formats/v1-code-blocks/types/file-data";
+import { needsTranscriptUpdate, saveWriteFileTranscript } from "src/components/formats/v1-code-blocks/utils/needsTranscriptUpdate";
+import { transcribeWriting } from "src/logic/transcribe-writing";
+
+//////////
+//////////
+
+export const fetchTranscriptIfNeeded = (plugin: InkPlugin, fileRef: TFile, pageData: InkFileData_v1): void => {
+	if(needsTranscriptUpdate(pageData)) {
+		void plugin.app.vault.read(fileRef)
+			.then((writingSvgFileContent) => transcribeWriting(writingSvgFileContent, plugin.settings.customTranscriptionProvider))
+			.then((transcript) => {
+				void saveWriteFileTranscript(plugin, fileRef, transcript);
+			})
+	}
+}

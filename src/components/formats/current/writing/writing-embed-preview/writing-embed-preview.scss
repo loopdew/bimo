@@ -1,0 +1,24 @@
+.ddc_ink_writing-embed-preview {
+    pointer-events: none;
+
+    overflow: visible;
+
+    > svg {
+        max-width: 100%;
+        max-height: 100%;
+        display: block;
+    }
+
+    &.ddc_ink_visible-background {
+        border: solid 1px var(--color-base-20);
+        border-radius: 20px;
+        background-color: var(--color-base-05);
+    }
+
+    // Writing line stroke: ink-writing-guide-lines.scss
+
+    &:not(.ddc_ink_visible-lines) {
+        line { display: none; }
+    }
+
+}

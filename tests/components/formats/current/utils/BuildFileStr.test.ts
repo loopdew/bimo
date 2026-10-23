@@ -1,0 +1,242 @@
+import { describe, expect, test } from '@jest/globals';
+import { buildFileStr } from 'src/components/formats/current/utils/buildFileStr';
+import { extractInkJsonFromSvg } from 'src/logic/utils/extractInkJsonFromSvg';
+import { InkFileData } from 'src/components/formats/current/types/file-data';
+import { PLUGIN_VERSION, TLDRAW_VERSION } from 'src/constants';
+import { DEFAULT_STROKE_STYLE, type InkCanvasSnapshot } from 'src/ink-canvas/types';
+
+////////
+////////
+
+const minimalSnapshot = {
+	document: { store: {}, schema: { schemaVersion: 2, sequences: {} } },
+	session: {},
+} as any;
+
+function makeWritingFileData(writingLineHeight?: number): InkFileData {
+	return {
+		meta: {
+			pluginVersion: PLUGIN_VERSION,
+			tldrawVersion: TLDRAW_VERSION,
+			fileType: 'inkWriting',
+			writingLineHeight,
+		},
+		tldraw: minimalSnapshot,
+		svgString: '<svg xmlns="http://www.w3.org/2000/svg"><defs/></svg>',
+	};
+}
+
+function makeDrawingFileData(): InkFileData {
+	return {
+		meta: {
+			pluginVersion: PLUGIN_VERSION,
+			tldrawVersion: TLDRAW_VERSION,
+			fileType: 'inkDrawing',
+		},
+		tldraw: minimalSnapshot,
+		svgString: '<svg xmlns="http://www.w3.org/2000/svg"><defs/></svg>',
+	};
+}
+
+function makeInkCanvasFileData(): InkFileData {
+	const inkCanvas: InkCanvasSnapshot = {
+		version: 1,
+		strokes: [{
+			id: 'stroke<&',
+			points: [[0, 0, 0.5], [10, 10, 0.7]],
+			style: { ...DEFAULT_STROKE_STYLE },
+			offset: { x: 0, y: 0 },
+		}],
+		gridEnabled: false,
+		writingLineHeight: 150,
+	};
+	return {
+		meta: {
+			pluginVersion: PLUGIN_VERSION,
+			tldrawVersion: '',
+			fileType: 'inkWriting',
+		},
+		tldraw: minimalSnapshot,
+		inkCanvas,
+		svgString: '<svg xmlns="http://www.w3.org/2000/svg"><metadata><ink-canvas>stale</ink-canvas></metadata><path id="kept"/></svg>',
+	};
+}
+
+////////
+////////
+
+describe('buildFileStr — writing-line-height attribute', () => {
+
+	test('includes writing-line-height attribute when writingLineHeight is set', () => {
+		const result = buildFileStr(makeWritingFileData(200));
+		expect(result).toContain('writing-line-height="200"');
+	});
+
+	test('includes correct value for non-default line heights', () => {
+		const result = buildFileStr(makeWritingFileData(50));
+		expect(result).toContain('writing-line-height="50"');
+
+		const result400 = buildFileStr(makeWritingFileData(400));
+		expect(result400).toContain('writing-line-height="400"');
+	});
+
+	test('omits writing-line-height attribute when writingLineHeight is undefined', () => {
+		const result = buildFileStr(makeWritingFileData(undefined));
+		expect(result).not.toContain('writing-line-height');
+	});
+
+	test('drawing file never includes writing-line-height attribute', () => {
+		const result = buildFileStr(makeDrawingFileData());
+		expect(result).not.toContain('writing-line-height');
+	});
+
+	test('always includes the ink element with file-type attribute', () => {
+		const result = buildFileStr(makeWritingFileData(150));
+		expect(result).toContain('file-type="inkWriting"');
+	});
+
+	test('always includes the tldraw element', () => {
+		const result = buildFileStr(makeWritingFileData(150));
+		expect(result).toContain('<tldraw');
+	});
+});
+
+describe('buildFileStr — ink-canvas serialization', () => {
+	test('replaces only metadata and keeps rendered SVG markup intact', () => {
+		const result = buildFileStr(makeInkCanvasFileData());
+
+		expect(result.match(/<metadata\b/g)).toHaveLength(1);
+		expect(result).toContain('<path id="kept"/>');
+		expect(result).not.toContain('stale');
+	});
+
+	test('removes every stale metadata block before inserting the current snapshot', () => {
+		const data = makeInkCanvasFileData();
+		data.svgString = data.svgString.replace(
+			'<path id="kept"/>',
+			'<metadata><ink-canvas>also-stale</ink-canvas></metadata><path id="kept"/>',
+		);
+
+		const result = buildFileStr(data);
+		expect(result.match(/<metadata\b/g)).toHaveLength(1);
+		expect(result).not.toContain('also-stale');
+		expect(result).toContain('<path id="kept"/>');
+	});
+
+	test('uses compact XML-safe JSON that survives a round trip', () => {
+		const result = buildFileStr(makeInkCanvasFileData());
+		const parsed = extractInkJsonFromSvg(result);
+
+		expect(result).toContain('"version":1');
+		expect(result).not.toContain('\n  "version"');
+		expect(result).toContain('stroke&lt;&amp;');
+		expect(parsed?.inkCanvas?.strokes[0].id).toBe('stroke<&');
+		expect(parsed?.inkCanvas?.writingLineHeight).toBe(150);
+	});
+});
+
+////////
+
+describe('buildFileStr — round-trip with extractInkJsonFromSvg', () => {
+
+	test('writingLineHeight 200 survives a full serialize → parse round-trip', () => {
+		const original = makeWritingFileData(200);
+		const svgStr = buildFileStr(original);
+		const parsed = extractInkJsonFromSvg(svgStr);
+
+		expect(parsed).not.toBeNull();
+		expect(parsed!.meta.writingLineHeight).toBe(200);
+	});
+
+	test('writingLineHeight 50 survives a full serialize → parse round-trip', () => {
+		const original = makeWritingFileData(50);
+		const svgStr = buildFileStr(original);
+		const parsed = extractInkJsonFromSvg(svgStr);
+
+		expect(parsed).not.toBeNull();
+		expect(parsed!.meta.writingLineHeight).toBe(50);
+	});
+
+	test('undefined writingLineHeight round-trips as undefined (old-file compat)', () => {
+		const original = makeWritingFileData(undefined);
+		const svgStr = buildFileStr(original);
+		const parsed = extractInkJsonFromSvg(svgStr);
+
+		expect(parsed).not.toBeNull();
+		expect(parsed!.meta.writingLineHeight).toBeUndefined();
+	});
+
+	test('fileType is preserved through the round-trip', () => {
+		const original = makeWritingFileData(150);
+		const svgStr = buildFileStr(original);
+		const parsed = extractInkJsonFromSvg(svgStr);
+
+		expect(parsed).not.toBeNull();
+		expect(parsed!.meta.fileType).toBe('inkWriting');
+	});
+
+	test('second serialize after parse produces identical writingLineHeight', () => {
+		// Simulates: load file → buildFileStr (save) → extractInkJsonFromSvg (load again)
+		const original = makeWritingFileData(300);
+		const firstSvg = buildFileStr(original);
+		const firstParsed = extractInkJsonFromSvg(firstSvg);
+
+		const secondSvg = buildFileStr({ ...firstParsed!, svgString: firstSvg });
+		const secondParsed = extractInkJsonFromSvg(secondSvg);
+
+		expect(secondParsed!.meta.writingLineHeight).toBe(300);
+	});
+
+	test('markdown transcript round-trips via transcript element (tldraw)', () => {
+		const markdown = '**bold**\n\n[line](https://example.com)\n<tag>';
+		const original = makeWritingFileData(150);
+		original.meta.transcript = markdown;
+		const svgStr = buildFileStr(original);
+
+		expect(svgStr).toContain('<transcript>');
+		expect(svgStr).not.toContain('transcript="');
+		expect(svgStr).toContain('&lt;tag&gt;');
+
+		const parsed = extractInkJsonFromSvg(svgStr);
+		expect(parsed?.meta.transcript).toBe(markdown);
+	});
+
+	test('markdown transcript round-trips via transcript element (ink-canvas)', () => {
+		const markdown = 'Line one\nLine two';
+		const original = makeInkCanvasFileData();
+		original.meta.transcript = markdown;
+		const svgStr = buildFileStr(original);
+
+		expect(svgStr).toContain('<transcript>Line one\nLine two</transcript>');
+
+		const parsed = extractInkJsonFromSvg(svgStr);
+		expect(parsed?.meta.transcript).toBe(markdown);
+	});
+
+	test('reads legacy ink transcript attribute when transcript element is absent', () => {
+		const svgStr = `<svg xmlns="http://www.w3.org/2000/svg">
+<metadata>
+<ink plugin-version="1" file-type="inkWriting" transcript="legacy text"/>
+<tldraw version="2">{}</tldraw>
+</metadata>
+</svg>`;
+		const parsed = extractInkJsonFromSvg(svgStr);
+		expect(parsed?.meta.transcript).toBe('legacy text');
+	});
+
+	test('omits transcript element when meta.transcript is empty', () => {
+		const original = makeWritingFileData(150);
+		original.meta.transcript = '';
+		const svgStr = buildFileStr(original);
+		expect(svgStr).not.toContain('<transcript>');
+		expect(svgStr).not.toContain('transcript="');
+	});
+
+	test('escapes ampersands in transcript element text', () => {
+		const original = makeInkCanvasFileData();
+		original.meta.transcript = 'rock & roll';
+		const svgStr = buildFileStr(original);
+		expect(svgStr).toContain('<transcript>rock &amp; roll</transcript>');
+		expect(extractInkJsonFromSvg(svgStr)?.meta.transcript).toBe('rock & roll');
+	});
+});

@@ -1,0 +1,1094 @@
+import './drawing-editor.scss';
+import { t } from 'src/i18n';
+import * as React from 'react';
+import { useRef } from 'react';
+import { MarkdownView, Notice, Platform, TFile } from 'obsidian';
+import { syncTranscriptBlockInVault } from 'src/logic/transcript-block';
+import { MagicPanel } from 'src/components/dom-components/modals/magic-panel/magic-panel';
+import { pickVaultImage } from 'src/components/dom-components/modals/image-picker-modal/image-picker-modal';
+import { cycleBackgroundOpacity, setInkFileBackgroundWithNotice } from 'src/logic/background/set-background';
+import { insertMermaidFromDrawing } from 'src/logic/ai/mermaid';
+import { exportInkFileToExcalidraw } from 'src/logic/export/export-actions';
+import { useAtomValue } from 'jotai';
+import classNames from 'classnames';
+import { InkFileData, InkFileMetadata } from 'src/components/formats/current/types/file-data';
+import { buildInkCanvasDrawingFileData } from 'src/components/formats/current/utils/build-file-data';
+import { isInkCanvasFile } from 'src/components/formats/current/utils/ink-file-storage-engine';
+import { DRAW_LONG_DELAY_MS, DRAW_SHORT_DELAY_MS } from 'src/constants';
+import { PrimaryMenuBar } from 'src/components/jsx-components/primary-menu-bar/primary-menu-bar';
+import { InkCanvasDrawingMenu } from 'src/components/jsx-components/drawing-menu/ink-canvas-drawing-menu';
+import ExtendedDrawingMenu from 'src/components/jsx-components/extended-drawing-menu/extended-drawing-menu';
+import { type MenuOption } from 'src/components/jsx-components/overflow-menu/overflow-menu';
+import { SecondaryMenuBar } from 'src/components/jsx-components/secondary-menu-bar/secondary-menu-bar';
+import { InkCanvasModifyMenu } from 'src/components/jsx-components/ink-canvas-modify-menu/ink-canvas-modify-menu';
+import { ResizeHandle } from 'src/components/jsx-components/resize-handle/resize-handle';
+import { verbose } from 'src/logic/utils/universal-dev-logging';
+import { logToVault } from 'src/logic/utils/log-to-vault';
+import { getBooxConnectionEnabled } from 'src/logic/device-settings/device-settings';
+import { buildBooxCornerMarkers } from 'src/connections/boox/boox-corner-markers';
+import { useBooxConnectionEnabled } from 'src/logic/device-settings/use-boox-connection-enabled';
+import { useFingerDrawingEnabled } from 'src/logic/device-settings/use-finger-drawing-enabled';
+import { restoreEmbedCmScrollerScroll } from 'src/logic/utils/restore-embed-cm-scroller-scroll';
+import { getGlobals } from 'src/stores/global-store';
+import { extractInkJsonFromSvg } from 'src/logic/utils/extractInkJsonFromSvg';
+import { embedsInEditModeAtom_v2, type DrawingEditorControls } from '../drawing-embed/drawing-embed';
+import { registerDedicatedInkEditor, unregisterDedicatedInkEditor } from 'src/logic/undo-redo/dedicated-ink-editor-registry';
+import { register as registerInkEditor, unregister as unregisterInkEditor } from 'src/logic/undo-redo/ink-editor-registry';
+import {
+	initializeEmbeddedUnifiedUndo,
+	recordEmbedCanvasActionOnUnifiedStack,
+} from 'src/logic/undo-redo/embedded-unified-undo';
+import { InkSvgCanvas } from 'src/ink-canvas/ink-svg-canvas';
+import { renderStrokesToSvg } from 'src/ink-canvas/svg-export';
+import { bakeBackgroundForSvg } from 'src/ink-canvas/bake-background';
+import { registerInkEditorForPath } from 'src/logic/ink-editor-registry';
+import { resolveInkAutosaveDelayMs } from 'src/ink-canvas/autosave-delay';
+import { migrateFromTldraw } from 'src/ink-canvas/migrate-from-tldraw';
+import { useDominantHand } from 'src/stores/dominant-hand-store';
+import { useDedicatedInkWorkspaceChrome } from 'src/logic/utils/use-dedicated-ink-workspace-chrome';
+import { revealInkFileInExplorer } from 'src/logic/utils/reveal-ink-file-in-explorer';
+import { debug } from 'src/logic/utils/universal-dev-logging';
+import type { CameraState, InkCanvasEditor, InkCanvasSnapshot, InkStroke, InkPoint } from 'src/ink-canvas/types';
+import { normalizeBooxPenPressureForCapture } from 'src/ink-canvas/constants/pen-input';
+import { buildInkStrokeStyleForTreatAs } from 'src/ink-canvas/stroke-presets';
+import { inkStrokeTimestampsFromBooxPoints } from 'src/ink-canvas/utils/stroke-timestamps';
+import { isWritingAlignedDrawingEmbed, type EmbedSettings } from 'src/types/embed-settings';
+import { showLegacyInkUnlockNotice } from 'src/logic/utils/legacy-ink-notice';
+import { useDrawingEmbedToolbarCompact } from './use-drawing-embed-toolbar-compact';
+import { buildFileStr } from 'src/components/formats/current/utils/buildFileStr';
+import {
+	enqueueManualTranscription,
+	registerTranscriptionEditorSession,
+	replaceTranscriptionEditorSession,
+	unregisterTranscriptionEditorSession,
+} from 'src/logic/handwriting-transcription-queue';
+
+///////////////////////////
+///////////////////////////
+
+/** Stroke point received from the Boox eInk Bridge in canvas-relative coordinates. */
+interface BooxCanvasPoint {
+	pressure: number;
+	size: number;
+	tiltX: number;
+	tiltY: number;
+	timestamp: number;
+	x: number;
+	y: number;
+}
+
+interface BooxStrokePayload {
+	strokeId?: number;
+	points?: BooxCanvasPoint[];
+	canvasWidth?: number;
+	canvasHeight?: number;
+}
+
+/** Saved embed viewBox vs live camera can differ slightly from fractional layout without a real framing change. */
+const EMBED_VIEWBOX_DIRTY_EPS = 0.75;
+
+/** Maps ink-canvas camera + container size to the embed viewBox persisted in the Edit link. */
+function viewBoxFromCameraAndContainerRect(
+	camera: CameraState,
+	containerRect: DOMRect,
+): { x: number; y: number; width: number; height: number } | null {
+	if (containerRect.width <= 0 || containerRect.height <= 0) return null;
+	return {
+		x: -camera.x,
+		y: -camera.y,
+		width: containerRect.width / camera.zoom,
+		height: containerRect.height / camera.zoom,
+	};
+}
+
+/** True when the live viewBox differs from the saved embed framing beyond layout tolerance. */
+function isEmbedViewBoxDirtyComparedToSaved(
+	liveViewBox: { x: number; y: number; width: number; height: number },
+	savedViewBox: { x: number; y: number; width: number; height: number },
+): boolean {
+	const dx = Math.abs(liveViewBox.x - savedViewBox.x);
+	const dy = Math.abs(liveViewBox.y - savedViewBox.y);
+	const dw = Math.abs(liveViewBox.width - savedViewBox.width);
+	const dh = Math.abs(liveViewBox.height - savedViewBox.height);
+	return (
+		dx > EMBED_VIEWBOX_DIRTY_EPS
+		|| dy > EMBED_VIEWBOX_DIRTY_EPS
+		|| dw > EMBED_VIEWBOX_DIRTY_EPS
+		|| dh > EMBED_VIEWBOX_DIRTY_EPS
+	);
+}
+
+interface DrawingEditorProps {
+	onReady?: () => void;
+	workspaceLeafId: string;
+	embedId?: string;
+	drawingFile: TFile;
+	save: (pageData: InkFileData) => void | Promise<void>;
+	extendedMenu?: MenuOption[];
+	embedSettings?: EmbedSettings;
+	onSaveCameraPosition?: (viewBox: { x: number; y: number; width: number; height: number }) => void;
+
+	// For embeds
+	embedded?: boolean;
+	resizeEmbed?: (pxWidthDiff: number, pxHeightDiff: number) => void;
+	onResizeStart?: () => void;
+	onResizeEnd?: () => void;
+	onEmbedResizeEnd?: () => void;
+	applyEmbedDimensions?: (width: number, aspectRatio: number) => void;
+	closeEditor?: () => void | Promise<void>;
+	saveControlsReference?: (controls: DrawingEditorControls) => void;
+	onOpenInDedicatedView?: () => void;
+	onTranscriptSaved?: (transcript: string) => void;
+}
+
+export const DrawingEditorWrapper: React.FC<DrawingEditorProps> = (props) => {
+	const embedsInEditMode = useAtomValue(embedsInEditModeAtom_v2);
+	const editorActive = !!props.embedId && embedsInEditMode.has(props.embedId);
+
+	if (editorActive) return <DrawingEditor {...props} />;
+	return <></>;
+};
+
+export function DrawingEditor(props: DrawingEditorProps) {
+
+	const dominantHand = useDominantHand();
+	const workspaceChrome = useDedicatedInkWorkspaceChrome(props.workspaceLeafId, !props.embedded);
+	const isBooxConnectionEnabled = useBooxConnectionEnabled();
+	const isFingerDrawingGloballyEnabled = useFingerDrawingEnabled();
+	const [isFingerDrawingActive, setIsFingerDrawingActive] = React.useState(false);
+	const [initialSnapshot, setInitialSnapshot] = React.useState<InkCanvasSnapshot>();
+	const shortDelayTimerRef = useRef<number>();
+	const canvasInteractionActiveRef = useRef(false);
+	const hasUnsavedChangesRef = useRef(false);
+	const editorRef = useRef<InkCanvasEditor>();
+	const editorWrapperRefEl = useRef<HTMLDivElement>(null);
+	const websocketConnectedRef = useRef(false);
+	const [isBooxInputLocked, setIsBooxInputLocked] = React.useState(false);
+	const activateDrawingSessionRef = useRef<(() => void) | null>(null);
+	const adjustThrottleRef = useRef<number | null>(null);
+	const setBooxOverlayActiveTimerRef = useRef<number | null>(null);
+	const isViewActiveRef = useRef(true);
+	const pendingNewOverlayRef = useRef(false);
+	const [isSaveCameraEnabled, setIsSaveCameraEnabled] = React.useState(false);
+	const isEmbedResizeGestureActiveRef = useRef(false);
+	const hasHandledInitialCameraRef = useRef(false);
+	// Tracks first init only — later InkSvgCanvas remounts must not hide save framing mid-edit.
+	const isLegacyInkFileRef = useRef(false);
+	const transcriptRef = useRef<string | undefined>(undefined);
+	/** Metadata from the file as loaded; merged into every save. */
+	const inkMetaRef = useRef<InkFileMetadata | undefined>(undefined);
+	const transcriptionSessionRegisteredRef = useRef(false);
+	const [hasTranscript, setHasTranscript] = React.useState(false);
+
+	// On mount
+	React.useEffect(() => {
+		verbose('INK CANVAS EDITOR mounted');
+		logToVault('笔墨 canvas editor mounted: ' + props.drawingFile.path + (props.embedded ? ' [embed]' : ' [dedicated]'));
+		void fetchFileData();
+		return () => {
+			verbose('INK CANVAS EDITOR unmounting');
+			logToVault('笔墨 canvas editor unmounted: ' + props.drawingFile.path);
+			transcriptionSessionRegisteredRef.current = false;
+			// Note/tab close never calls saveAndHalt. Finish the last save then unregister
+			// so a held transcript is written before enqueueAuto reads disk strokes.
+			void Promise.resolve(completeSave()).finally(() => {
+				return unregisterTranscriptionEditorSession(props.drawingFile.path);
+			});
+		};
+	}, []);
+
+	React.useEffect(() => {
+		if (!isFingerDrawingGloballyEnabled) setIsFingerDrawingActive(false);
+	}, [isFingerDrawingGloballyEnabled]);
+
+	useDrawingEmbedToolbarCompact(editorWrapperRefEl, {
+		// Wrapper + toolbar only exist after the SVG snapshot loads. Enabling earlier
+		// would run the overlap check against a null ref and never attach observers.
+		enabled: !!props.embedded && !!initialSnapshot,
+		isSaveCameraEnabled,
+		showFingerDrawingToggle: isFingerDrawingGloballyEnabled,
+	});
+
+	React.useEffect(() => {
+		if (!initialSnapshot || !isLegacyInkFileRef.current) return;
+		showLegacyInkUnlockNotice({
+			plugin: getGlobals().plugin,
+			legacyFile: props.drawingFile,
+			isEmbedded: props.embedded,
+		});
+	}, [initialSnapshot]);
+
+	// Safety-net: clear timers on unmount
+	React.useEffect(() => {
+		return () => {
+			resetTimers();
+		};
+	}, []);
+
+	// Boox companion app: register drawing session while this editor is active.
+	React.useEffect(() => {
+		if (!initialSnapshot) return;
+		const inkPlugin = getGlobals().plugin;
+		if (!getBooxConnectionEnabled()) return;
+
+		const { unregister, activate } = inkPlugin.booxConnection.registerDrawingSession({
+			onStroke: (strokeData: unknown) => {
+				const payload = strokeData as BooxStrokePayload;
+				const points = payload.points ?? (strokeData as BooxCanvasPoint[]);
+				if (createStrokeFromBoox(points, payload) && payload.strokeId !== undefined) {
+					inkPlugin.booxConnection.sendStrokeRendered(payload.strokeId);
+				}
+			},
+			onSocketOpen: () => {
+				// No Obsidian Notice here — Boox chrome and input lock already show companion mode.
+				websocketConnectedRef.current = true;
+				setIsBooxInputLocked(true);
+				debug('笔墨 canvas: Connected to Boox companion app WebSocket');
+				const sent = newAndroidDrawingArea();
+				if (sent) {
+					pendingNewOverlayRef.current = false;
+					const editor = editorRef.current;
+					if (editor) {
+						inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+					}
+				} else {
+					pendingNewOverlayRef.current = true;
+				}
+			},
+			onReactivate: () => {
+				if (!websocketConnectedRef.current) return;
+				if (setBooxOverlayActiveTimerRef.current) window.clearTimeout(setBooxOverlayActiveTimerRef.current);
+				setBooxOverlayActiveTimerRef.current = window.setTimeout(() => {
+					setBooxOverlayActiveTimerRef.current = null;
+					if (!websocketConnectedRef.current) return;
+					activateDrawingSessionRef.current?.();
+					const sent = newAndroidDrawingArea();
+					if (sent) {
+						pendingNewOverlayRef.current = false;
+						const editor = editorRef.current;
+						if (editor) inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+					} else {
+						pendingNewOverlayRef.current = true;
+					}
+				}, 0);
+			},
+		});
+		activateDrawingSessionRef.current = activate;
+
+		return () => {
+			websocketConnectedRef.current = false;
+			setIsBooxInputLocked(false);
+			pendingNewOverlayRef.current = false;
+			if (adjustThrottleRef.current) window.clearTimeout(adjustThrottleRef.current);
+			if (setBooxOverlayActiveTimerRef.current) window.clearTimeout(setBooxOverlayActiveTimerRef.current);
+			activateDrawingSessionRef.current = null;
+			unregister();
+		};
+	}, [initialSnapshot]);
+
+	// Adjust Boox drawing area on page scroll
+	React.useEffect(() => {
+		if (!initialSnapshot) return;
+		if (!editorWrapperRefEl.current) return;
+		if (!getBooxConnectionEnabled()) return;
+
+		const scrollEl = editorWrapperRefEl.current.closest('.cm-scroller');
+		if (!scrollEl) return;
+
+		const onScroll = () => {
+			if (!isViewActiveRef.current) return;
+			restoreEmbedCmScrollerScroll(editorWrapperRefEl.current);
+			adjustAndroidDrawingAreaThrottled();
+		};
+		scrollEl.addEventListener('scroll', onScroll, { passive: true });
+
+		const visualViewport = typeof window !== 'undefined' ? window.visualViewport : null;
+		const onVisualViewportChange = () => {
+			if (!isViewActiveRef.current) return;
+			restoreEmbedCmScrollerScroll(editorWrapperRefEl.current);
+			adjustAndroidDrawingAreaThrottled();
+		};
+		visualViewport?.addEventListener('scroll', onVisualViewportChange);
+		visualViewport?.addEventListener('resize', onVisualViewportChange);
+
+		return () => {
+			scrollEl.removeEventListener('scroll', onScroll);
+			visualViewport?.removeEventListener('scroll', onVisualViewportChange);
+			visualViewport?.removeEventListener('resize', onVisualViewportChange);
+		};
+	}, [initialSnapshot]);
+
+	React.useEffect(() => {
+		if (!initialSnapshot) return;
+		if (!editorWrapperRefEl.current) return;
+
+		const resizeObserver = new ResizeObserver(() => {
+			if (pendingNewOverlayRef.current && isViewActiveRef.current && websocketConnectedRef.current) {
+				const sent = newAndroidDrawingArea();
+				if (sent) {
+					pendingNewOverlayRef.current = false;
+					const inkPlugin = getGlobals().plugin;
+					const editor = editorRef.current;
+					if (editor) {
+						inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+					}
+					return;
+				}
+				return;
+			}
+			if (websocketConnectedRef.current && isViewActiveRef.current) {
+				adjustAndroidDrawingAreaThrottled();
+			}
+		});
+		resizeObserver.observe(editorWrapperRefEl.current);
+		return () => resizeObserver.disconnect();
+	}, [initialSnapshot]);
+
+	// Editor lifecycle
+	///////////////////////////
+
+	function handleEditorReady(editor: InkCanvasEditor) {
+		editorRef.current = editor;
+		const leafId = props.workspaceLeafId;
+
+		// Lets "set page image" reach this editor without a remount.
+		registerInkEditorForPath(props.drawingFile.path, editor);
+
+		// Register with undo system
+		if (props.embedded && props.embedId && leafId) {
+			initializeEmbeddedUnifiedUndo(getGlobals().plugin, leafId, props.embedId, editor);
+			registerInkEditor(
+				props.embedId,
+				editor,
+				editor.getContainerElement()!,
+				leafId,
+				props.applyEmbedDimensions,
+			);
+		}
+		if (!props.embedded && leafId) {
+			registerDedicatedInkEditor(leafId, editor);
+		}
+
+		// Remove loading class
+		if (editorWrapperRefEl.current) {
+			editorWrapperRefEl.current.classList.remove('ddc_ink_editor-wrapper--loading');
+		}
+
+		// Register save controls
+		const controls = {
+			save: () => completeSave(),
+			saveAndHalt: async (): Promise<void> => {
+				await completeSave();
+				unmountActions();
+				// Close the transcription session before embed lock calls enqueueAuto.
+				// React unmount is async; leaving the session open makes kick skip the job.
+				transcriptionSessionRegisteredRef.current = false;
+				await unregisterTranscriptionEditorSession(props.drawingFile.path);
+			},
+			eraseAll: async (): Promise<void> => {
+				editor.eraseAll();
+				await completeSave();
+			},
+			setBooxOverlayActive: (isActive: boolean) => {
+				isViewActiveRef.current = isActive;
+				if (isActive && websocketConnectedRef.current) {
+					activateDrawingSessionRef.current?.();
+					const sent = newAndroidDrawingArea();
+					if (!sent) pendingNewOverlayRef.current = true;
+				} else if (!isActive) {
+					pendingNewOverlayRef.current = false;
+					const inkPluginForOverlay = getGlobals().plugin;
+					if (getBooxConnectionEnabled()) {
+						inkPluginForOverlay.booxConnection.sendCloseDrawingArea();
+					}
+				}
+			},
+		};
+		if (props.saveControlsReference) {
+			props.saveControlsReference(controls);
+		}
+		const transcriptionSession = {
+			filePath: props.drawingFile.path,
+			fileType: 'inkDrawing' as const,
+			saveAndHalt: controls.saveAndHalt,
+			onTranscriptApplied: (transcript: string) => {
+				transcriptRef.current = transcript;
+				setHasTranscript(true);
+				props.onTranscriptSaved?.(transcript);
+			},
+		};
+		if (transcriptionSessionRegisteredRef.current) {
+			replaceTranscriptionEditorSession(transcriptionSession);
+		} else {
+			registerTranscriptionEditorSession(transcriptionSession);
+			transcriptionSessionRegisteredRef.current = true;
+		}
+
+		// Socket may have opened before the canvas mounted.
+		const inkPlugin = getGlobals().plugin;
+		if (getBooxConnectionEnabled() && inkPlugin.booxConnection.isConnected()) {
+			websocketConnectedRef.current = true;
+			setIsBooxInputLocked(true);
+			activateDrawingSessionRef.current?.();
+			newAndroidDrawingArea();
+			const editor = editorRef.current;
+			if (editor) {
+				inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+			}
+		}
+
+		if (props.onReady) props.onReady();
+	}
+
+	function unmountActions() {
+		resetTimers();
+		const leafId = props.workspaceLeafId;
+		if (props.embedded && props.embedId) {
+			unregisterInkEditor(props.embedId);
+		}
+		if (!props.embedded && leafId) {
+			unregisterDedicatedInkEditor(leafId, editorRef.current!);
+		}
+	}
+
+	function handleStoreChange() {
+		hasUnsavedChangesRef.current = true;
+		queueSaves();
+	}
+
+	function handleCanvasInteractionChange(active: boolean) {
+		// Pause autosave while the pen is down so large SVG serialize cannot hitch mid-stroke.
+		canvasInteractionActiveRef.current = active;
+		if (active) {
+			resetTimers();
+			return;
+		}
+		if (hasUnsavedChangesRef.current) queueSaves();
+	}
+
+	function handleEmbedUndoStackPush() {
+		if (props.embedded && props.embedId && props.workspaceLeafId) {
+			recordEmbedCanvasActionOnUnifiedStack(props.workspaceLeafId, props.embedId);
+		}
+	}
+
+
+	// Save pipeline
+	///////////////////////////
+
+	function queueSaves() {
+		resetTimers();
+		// One quiet-period save only — ink-canvas incremental/complete bodies are identical;
+		// a second long-delay timer would re-serialize the full SVG for free.
+		if (canvasInteractionActiveRef.current) return;
+		const delayMs = resolveInkAutosaveDelayMs(Platform, DRAW_SHORT_DELAY_MS, DRAW_LONG_DELAY_MS);
+		shortDelayTimerRef.current = window.setTimeout(() => {
+			void incrementalSave();
+		}, delayMs);
+	}
+
+	async function incrementalSave() {
+		if (canvasInteractionActiveRef.current) {
+			queueSaves();
+			return;
+		}
+		const editor = editorRef.current;
+		if (!editor) return;
+		verbose('incrementalSave (ink-canvas)');
+		logToVault('incrementalSave (ink-canvas drawing): ' + props.drawingFile.path);
+
+		const snapshot = editor.getSnapshot();
+		const svgString = await renderSnapshotSvg(snapshot);
+		hasUnsavedChangesRef.current = false;
+		const fileData = buildInkCanvasDrawingFileData({
+			inkCanvasSnapshot: snapshot,
+			svgString,
+			transcript: transcriptRef.current,
+			meta: inkMetaRef.current,
+		});
+		await props.save(fileData);
+	}
+
+	/**
+	 * Drawing-mode renderer with the page image baked in.
+	 *
+	 * Unlike writing mode there is no fixed page width, so the background keeps its
+	 * own pixel width as the canvas coordinate space.
+	 */
+	async function renderSnapshotSvg(snapshot: ReturnType<InkCanvasEditor['getSnapshot']>): Promise<string> {
+		const background = snapshot.background;
+		const baked = background
+			? await bakeBackgroundForSvg(getGlobals().plugin.app, background, background.width)
+			: undefined;
+		return renderStrokesToSvg(snapshot.strokes, snapshot, 16, baked);
+	}
+
+	async function completeSave(): Promise<void> {
+		const editor = editorRef.current;
+		if (!editor) return;
+		verbose('completeSave (ink-canvas)');
+		logToVault('completeSave (ink-canvas drawing): ' + props.drawingFile.path);
+
+		const snapshot = editor.getSnapshot();
+		const svgString = await renderSnapshotSvg(snapshot);
+		hasUnsavedChangesRef.current = false;
+		const fileData = buildInkCanvasDrawingFileData({
+			inkCanvasSnapshot: snapshot,
+			svgString,
+			transcript: transcriptRef.current,
+			meta: inkMetaRef.current,
+		});
+		await props.save(fileData);
+	}
+
+	function resetTimers() {
+		window.clearTimeout(shortDelayTimerRef.current);
+	}
+
+
+	// File loading
+	///////////////////////////
+
+	async function fetchFileData() {
+		const svg = await props.drawingFile.vault.read(props.drawingFile);
+		if (!svg) {
+			logToVault('Drawing file unreadable: ' + props.drawingFile.path);
+			return;
+		}
+
+		const inkFileData = extractInkJsonFromSvg(svg);
+		if (!inkFileData) {
+			logToVault('Drawing file has no ink JSON: ' + props.drawingFile.path);
+			return;
+		}
+
+		isLegacyInkFileRef.current = !isInkCanvasFile(inkFileData);
+		transcriptRef.current = inkFileData.meta.transcript;
+		// Carried into every save: an editor save rebuilds the file from the
+		// snapshot, so anything omitted here is erased (see build-file-data.ts).
+		inkMetaRef.current = inkFileData.meta;
+		setHasTranscript(!!inkFileData.meta.transcript);
+
+		// If this is already an ink-canvas file, use its snapshot directly
+		if (isInkCanvasFile(inkFileData) && inkFileData.inkCanvas) {
+			setInitialSnapshot(inkFileData.inkCanvas);
+			return;
+		}
+
+		// Otherwise migrate from tldraw format
+		const migrated = migrateFromTldraw(inkFileData.tldraw);
+		setInitialSnapshot(migrated);
+	}
+
+
+	// Getters
+	///////////////////////////
+
+	function getEditor(): InkCanvasEditor | undefined {
+		return editorRef.current;
+	}
+
+	function computeCurrentViewBox(): { x: number; y: number; width: number; height: number } | null {
+		const editor = editorRef.current;
+		if (!editor) return null;
+		const container = editor.getContainerElement();
+		if (!container) return null;
+		return viewBoxFromCameraAndContainerRect(editor.getCamera(), container.getBoundingClientRect());
+	}
+
+	/** Syncs the purple save-framing control from a known camera + container snapshot. */
+	function syncSaveFramingControlFromCamera(camera: CameraState, containerRect: DOMRect) {
+		if (!props.embedded || !props.embedSettings) {
+			setIsSaveCameraEnabled(false);
+			return;
+		}
+		const liveViewBox = viewBoxFromCameraAndContainerRect(camera, containerRect);
+		if (!liveViewBox) {
+			setIsSaveCameraEnabled(false);
+			return;
+		}
+		const isDirty = isEmbedViewBoxDirtyComparedToSaved(liveViewBox, props.embedSettings.viewBox);
+		setIsSaveCameraEnabled(isDirty);
+	}
+
+	function handleSaveCameraPosition() {
+		const vb = computeCurrentViewBox();
+		if (!vb) return;
+		props.onSaveCameraPosition?.(vb);
+		setIsSaveCameraEnabled(false);
+	}
+
+	/**
+	 * Manual overflow action: enqueue live-canvas SVG. Not gated by auto-transcribe settings.
+	 */
+	async function handleTranscribe() {
+		const editor = editorRef.current;
+		if (!editor) return;
+		const snapshot = editor.getSnapshot();
+		// 笔墨-only on purpose: a PDF background would make the model transcribe the
+		// printed page text as if it were the user's drawing.
+		const svgString = renderStrokesToSvg(snapshot.strokes, snapshot);
+		const drawingSvgFileContent = buildFileStr(buildInkCanvasDrawingFileData({
+			inkCanvasSnapshot: snapshot,
+			svgString,
+			transcript: transcriptRef.current,
+		}));
+		// Capture live canvas before lock unmounts the editor; lock so preview + queue UI show while transcribing.
+		if (props.embedded && props.closeEditor) {
+			await props.closeEditor();
+		}
+		await enqueueManualTranscription({
+			file: props.drawingFile,
+			fileType: 'inkDrawing',
+			svgFileContent: drawingSvgFileContent,
+		});
+	}
+
+	async function handleInsertTranscriptBelow() {
+		const transcript = transcriptRef.current;
+		if (!transcript) return;
+		try {
+			await syncTranscriptBlockInVault(
+				getGlobals().plugin,
+				props.drawingFile.path,
+				'inkDrawing',
+				transcript,
+			);
+			new Notice(t('Transcript inserted below'));
+		} catch (error) {
+			verbose(['Insert transcript below failed', error]);
+			new Notice(t('Could not insert transcript below'));
+		}
+	}
+
+	const customExtendedMenu = [
+		{
+			text: hasTranscript ? t('Update transcript') : t('Transcribe'),
+			action: () => { void handleTranscribe(); },
+		},
+		...(hasTranscript ? [{
+			text: t('Insert transcript below'),
+			action: () => { void handleInsertTranscriptBelow(); },
+		}, {
+			text: t('Ask the margin'),
+			action: () => {
+				const view = getGlobals().plugin.app.workspace.getActiveViewOfType(MarkdownView);
+				new MagicPanel({
+					plugin: getGlobals().plugin,
+					editor: view?.editor,
+					contextTranscript: transcriptRef.current,
+					sourcePath: props.drawingFile.path,
+				}).open();
+			},
+		}] : []),
+		{
+			text: t('Set page image…'),
+			action: () => {
+				pickVaultImage(getGlobals().plugin.app, (file) => {
+					void setInkFileBackgroundWithNotice(getGlobals().plugin, props.drawingFile, file);
+				});
+			},
+		},
+		{
+			text: t('Fade page image'),
+			action: () => {
+				void cycleBackgroundOpacity(getGlobals().plugin, props.drawingFile).then((result) => {
+					if (!result.ok) new Notice(result.reason);
+				});
+			},
+		},
+		{
+			text: t('Remove page image'),
+			action: () => {
+				void setInkFileBackgroundWithNotice(getGlobals().plugin, props.drawingFile, null);
+			},
+		},
+		{
+			text: t('Export to Excalidraw'),
+			action: () => { void exportInkFileToExcalidraw(getGlobals().plugin, props.drawingFile); },
+		},
+		{
+			text: t('Convert to Mermaid'),
+			action: () => {
+				const view = getGlobals().plugin.app.workspace.getActiveViewOfType(MarkdownView);
+				if (!view?.editor) {
+					new Notice(t('Open a note first.'));
+					return;
+				}
+				void insertMermaidFromDrawing(getGlobals().plugin, props.drawingFile, view.editor);
+			},
+		},
+		{
+			text: t('Grid on/off'),
+			action: () => {
+				const editor = getEditor();
+				if (editor) editor.setGridEnabled(!editor.isGridEnabled());
+			},
+		},
+		...(props.extendedMenu || []),
+	];
+
+
+	// Resize
+	///////////////////////////
+
+	function resizeEmbed(pxWidthDiff: number, pxHeightDiff: number) {
+		if (props.resizeEmbed) props.resizeEmbed(pxWidthDiff, pxHeightDiff);
+	}
+
+	function onResizeStart() {
+		isEmbedResizeGestureActiveRef.current = true;
+		props.onResizeStart?.();
+	}
+
+	function onResizeEnd() {
+		props.onResizeEnd?.();
+		if (props.embedded) {
+			const editor = editorRef.current;
+			const container = editor?.getContainerElement();
+			if (editor && container) {
+				syncSaveFramingControlFromCamera(editor.getCamera(), container.getBoundingClientRect());
+			}
+			props.onEmbedResizeEnd?.();
+		}
+		isEmbedResizeGestureActiveRef.current = false;
+	}
+
+
+	// Boox bridge helpers
+	///////////////////////////
+
+	function computeClampDrawingSurfaceOverlay(surfaceRect: DOMRect): DOMRect {
+		const innerW = window.innerWidth;
+		const innerH = window.innerHeight;
+		const visibleTop = Math.max(0, surfaceRect.y);
+		const visibleBottom = Math.min(innerH, surfaceRect.y + surfaceRect.height);
+		const visibleLeft = Math.max(0, surfaceRect.x);
+		const visibleRight = Math.min(innerW, surfaceRect.x + surfaceRect.width);
+		const width = Math.round(Math.max(0, visibleRight - visibleLeft));
+		const height = Math.round(Math.max(0, visibleBottom - visibleTop));
+		return new DOMRect(Math.round(visibleLeft), Math.round(visibleTop), width, height);
+	}
+
+	function getBooxDrawingSurfaceRects(): { raw: DOMRect; clamped: DOMRect | null } | null {
+		const wrapper = editorWrapperRefEl.current;
+		if (!wrapper) return null;
+		let raw: DOMRect;
+		if (props.embedded) {
+			raw = wrapper.getBoundingClientRect();
+		} else {
+			const editor = editorRef.current;
+			const container = editor?.getContainerElement();
+			if (container) {
+				const cr = container.getBoundingClientRect();
+				raw = cr.width > 1 && cr.height > 1 ? cr : wrapper.getBoundingClientRect();
+			} else {
+				raw = wrapper.getBoundingClientRect();
+			}
+		}
+		const clamped = computeClampDrawingSurfaceOverlay(raw);
+		if (clamped.width <= 0 || clamped.height <= 0) {
+			return { raw, clamped: null };
+		}
+		return { raw, clamped };
+	}
+
+	function getBooxClientAreaRect(): DOMRect | null {
+		return getBooxDrawingSurfaceRects()?.clamped ?? null;
+	}
+
+	function buildBooxDrawingAreaPayload():
+		| {
+				x: number;
+				y: number;
+				canvasWidth: number;
+				canvasHeight: number;
+				appWidth: number;
+				appHeight: number;
+				cornerMarkers: ReturnType<typeof buildBooxCornerMarkers>;
+		  }
+		| null {
+		const surfaceRect = getBooxClientAreaRect();
+		if (!surfaceRect) return null;
+		const canvasWidth = Math.round(surfaceRect.width);
+		const canvasHeight = Math.round(surfaceRect.height);
+		if (canvasWidth === 0 || canvasHeight === 0) return null;
+		const wrapper = editorWrapperRefEl.current;
+		if (!wrapper) return null;
+		return {
+			x: Math.round(surfaceRect.x),
+			y: Math.round(surfaceRect.y),
+			canvasWidth,
+			canvasHeight,
+			appWidth: window.innerWidth,
+			appHeight: window.innerHeight,
+			cornerMarkers: buildBooxCornerMarkers({
+				wrapper,
+				isDedicatedView: !props.embedded,
+				hideBottomRightCorner: props.embedded,
+			}),
+		};
+	}
+
+	function newAndroidDrawingArea(): boolean {
+		if (!editorWrapperRefEl.current) return false;
+		const inkPlugin = getGlobals().plugin;
+		if (!getBooxConnectionEnabled()) return false;
+
+		const payload = buildBooxDrawingAreaPayload();
+		if (!payload) return false;
+
+		inkPlugin.booxConnection.sendNewDrawingArea(payload);
+		return true;
+	}
+
+	/**
+	 * Embeds: full new-drawing-area + update-tool (same path as pen-tool reactivation / lock-unlock).
+	 * Dedicated view: throttled update-drawing-area (release_0.5 behaviour).
+	 */
+	function repositionBooxOverlayAfterEmbedGeometryChange() {
+		restoreEmbedCmScrollerScroll(editorWrapperRefEl.current);
+		if (!websocketConnectedRef.current || !isViewActiveRef.current) return;
+		const inkPlugin = getGlobals().plugin;
+		if (!getBooxConnectionEnabled()) return;
+
+		if (props.embedded) {
+			activateDrawingSessionRef.current?.();
+			const sent = newAndroidDrawingArea();
+			if (sent) {
+				pendingNewOverlayRef.current = false;
+				const editor = editorRef.current;
+				if (editor) {
+					inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+				}
+			} else {
+				pendingNewOverlayRef.current = true;
+			}
+			return;
+		}
+		sendAdjustment(false);
+	}
+
+	/** Throttled — scroll and resize observer (matches release_0.5 / Bridge docs). */
+	function adjustAndroidDrawingAreaThrottled() {
+		if (adjustThrottleRef.current) window.clearTimeout(adjustThrottleRef.current);
+		adjustThrottleRef.current = window.setTimeout(() => {
+			adjustThrottleRef.current = null;
+			repositionBooxOverlayAfterEmbedGeometryChange();
+		}, 200);
+	}
+
+	function sendAdjustment(immediate: boolean) {
+		if (!editorWrapperRefEl.current) return;
+		if (!websocketConnectedRef.current) return;
+		if (!isViewActiveRef.current) return;
+		const inkPlugin = getGlobals().plugin;
+		if (!getBooxConnectionEnabled()) return;
+
+		const payload = buildBooxDrawingAreaPayload();
+		if (!payload) return;
+
+		inkPlugin.booxConnection.sendUpdateDrawingArea({
+			...payload,
+			immediate,
+		});
+	}
+
+	function getBooxStrokeSizeCssPx(editor: InkCanvasEditor): number {
+		const BOOX_STROKE_SIZE_SCALE = 2;
+		const style = editor.getStrokeStyle();
+		const zoom = editor.getCamera().zoom;
+		return style.size * zoom * BOOX_STROKE_SIZE_SCALE;
+	}
+
+	function handleBooxActivateTool(activatedTool: 'draw' | 'erase' | 'select') {
+		const inkPlugin = getGlobals().plugin;
+		if (!getBooxConnectionEnabled()) return;
+
+		const isNonDrawTool = activatedTool === 'erase' || activatedTool === 'select';
+		const isBooxConnected = inkPlugin.booxConnection.isConnected();
+
+		if (isNonDrawTool && websocketConnectedRef.current) {
+			websocketConnectedRef.current = false;
+			setIsBooxInputLocked(false);
+			pendingNewOverlayRef.current = false;
+			if (adjustThrottleRef.current) window.clearTimeout(adjustThrottleRef.current);
+			inkPlugin.booxConnection.sendCloseDrawingArea();
+		} else if (activatedTool === 'draw' && !websocketConnectedRef.current) {
+			if (isBooxConnected) {
+				websocketConnectedRef.current = true;
+				setIsBooxInputLocked(true);
+				activateDrawingSessionRef.current?.();
+				const sent = newAndroidDrawingArea();
+				if (sent) {
+					pendingNewOverlayRef.current = false;
+					const editor = editorRef.current;
+					if (editor) {
+						inkPlugin.booxConnection.sendUpdateTool('draw', getBooxStrokeSizeCssPx(editor));
+					}
+				} else {
+					pendingNewOverlayRef.current = true;
+				}
+			} else {
+				void inkPlugin.booxConnection.ensureConnected().catch((error) => {
+					verbose(['BooxConnection: reconnect from drawing draw tool failed', error]);
+				});
+			}
+		}
+	}
+
+	function createStrokeFromBoox(
+		canvasRelativePoints: BooxCanvasPoint[],
+		booxMeta?: { strokeId?: number; canvasWidth?: number; canvasHeight?: number },
+	): boolean {
+		if (!editorWrapperRefEl.current) return false;
+		const editor = editorRef.current;
+		if (!editor) return false;
+
+		const surfaceTriple = getBooxDrawingSurfaceRects();
+		if (!surfaceTriple?.clamped) return false;
+		const surfaceRect = surfaceTriple.clamped;
+
+		const payloadCw = booxMeta?.canvasWidth;
+		const payloadCh = booxMeta?.canvasHeight;
+		const sourceCanvasWidth = payloadCw && payloadCw > 0 ? payloadCw : surfaceRect.width;
+		const sourceCanvasHeight = payloadCh && payloadCh > 0 ? payloadCh : surfaceRect.height;
+		if (sourceCanvasWidth <= 0 || sourceCanvasHeight <= 0) return false;
+
+		const inkPoints: InkPoint[] = canvasRelativePoints.map(pt => {
+			const sx = surfaceRect.left + (pt.x / sourceCanvasWidth) * surfaceRect.width;
+			const sy = surfaceRect.top + (pt.y / sourceCanvasHeight) * surfaceRect.height;
+			const page = editor.screenToPage(sx, sy);
+			return [page.x, page.y, normalizeBooxPenPressureForCapture(pt.pressure)] as InkPoint;
+		});
+
+		const strokeId = `boox-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+		const stroke: InkStroke = {
+			id: strokeId,
+			authoringSource: 'boox',
+			points: inkPoints,
+			style: {
+				...buildInkStrokeStyleForTreatAs(editor.getStrokeStyle(), 'pen', editor.getCamera().zoom),
+				simulatePressure: false,
+			},
+			offset: { x: 0, y: 0 },
+			...inkStrokeTimestampsFromBooxPoints(canvasRelativePoints),
+		};
+
+		editor.addStroke(stroke);
+		return true;
+	}
+
+
+	// Render
+	///////////////////////////
+
+	if (!initialSnapshot) return <></>;
+
+	return <>
+		<div
+			ref={editorWrapperRefEl}
+			className={classNames([
+				'ddc_ink_drawing-editor',
+				'ddc_ink_editor-wrapper--loading',
+				!props.embedded && 'ddc_ink_dedicated-editor',
+				dominantHand === 'left' && 'ink_dominant-hand_left',
+			])}
+			style={{ height: '100%', position: 'relative' }}
+			tabIndex={props.embedded ? undefined : 0}
+		>
+			<InkSvgCanvas
+				initialSnapshot={initialSnapshot}
+				onEditorReady={handleEditorReady}
+				onChange={handleStoreChange}
+				onInteractionChange={handleCanvasInteractionChange}
+				onEmbedUndoStackPush={handleEmbedUndoStackPush}
+				onCameraChange={(camera, containerRect, meta) => {
+					// Init: suppress save framing only on the first settle after unlock (fractional layout).
+					if (meta.source === 'init') {
+						if (!hasHandledInitialCameraRef.current) {
+							hasHandledInitialCameraRef.current = true;
+							setIsSaveCameraEnabled(false);
+						}
+						return;
+					}
+					// Embed resize: ink canvas may emit api camera adjustments while the handle is dragged.
+					if (
+						meta.source === 'api'
+						&& props.embedded
+						&& isEmbedResizeGestureActiveRef.current
+					) {
+						syncSaveFramingControlFromCamera(camera, containerRect);
+						return;
+					}
+					if (meta.source === 'user') {
+						syncSaveFramingControlFromCamera(camera, containerRect);
+					}
+				}}
+				initialViewBox={props.embedded ? props.embedSettings?.viewBox : undefined}
+				writingAlignedZoom={
+					!!props.embedded
+					&& !!props.embedSettings
+					&& isWritingAlignedDrawingEmbed(props.embedSettings)
+				}
+				isEmbedded={props.embedded}
+				isBooxInputLocked={isBooxInputLocked}
+				isFingerDrawingActive={isFingerDrawingActive}
+				blockObsidianPenGestures={!!props.embedded || isBooxInputLocked}
+				onBooxEmbedGeometryChange={
+					props.embedded && isBooxInputLocked
+						? repositionBooxOverlayAfterEmbedGeometryChange
+						: undefined
+				}
+			/>
+
+			<PrimaryMenuBar>
+				<InkCanvasDrawingMenu
+					getEditor={getEditor}
+					onStoreChange={handleStoreChange}
+					onActivateTool={handleBooxActivateTool}
+					onExpandClick={props.embedded ? () => props.onOpenInDedicatedView?.() : undefined}
+					onEnterWorkspaceChrome={props.embedded ? undefined : workspaceChrome.onEnterWorkspaceChrome}
+					onExitWorkspaceChrome={props.embedded ? undefined : workspaceChrome.onExitWorkspaceChrome}
+					isWorkspaceChromeHidden={workspaceChrome.isWorkspaceChromeHidden}
+					onLocateFile={props.embedded ? undefined : () => revealInkFileInExplorer(props.drawingFile)}
+					showFingerDrawingToggle={isFingerDrawingGloballyEnabled}
+					isFingerDrawingActive={isFingerDrawingActive}
+					onFingerDrawingToggle={() => setIsFingerDrawingActive((active) => !active)}
+					embedId={props.embedId}
+					workspaceLeafId={props.workspaceLeafId}
+					plugin={getGlobals().plugin}
+				/>
+				{props.embedded && (
+					<ExtendedDrawingMenu
+						onSaveCameraClick={handleSaveCameraPosition}
+						isSaveCameraEnabled={isSaveCameraEnabled}
+						onLockClick={() => props.closeEditor?.()}
+						menuOptions={customExtendedMenu}
+					/>
+				)}
+				{!props.embedded && (
+					<ExtendedDrawingMenu menuOptions={customExtendedMenu} />
+				)}
+			</PrimaryMenuBar>
+
+			<SecondaryMenuBar>
+				<InkCanvasModifyMenu
+					getEditor={getEditor}
+					onStoreChange={handleStoreChange}
+					embedId={props.embedded && props.embedId ? props.embedId : undefined}
+					workspaceLeafId={props.embedded && props.workspaceLeafId ? props.workspaceLeafId : undefined}
+					plugin={props.embedded ? getGlobals().plugin : undefined}
+				/>
+			</SecondaryMenuBar>
+
+			{props.resizeEmbed && (
+				<ResizeHandle
+					resizeEmbed={resizeEmbed}
+					onResizeStart={onResizeStart}
+					onResizeEnd={onResizeEnd}
+				/>
+			)}
+		</div>
+	</>;
+}

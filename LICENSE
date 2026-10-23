@@ -1,0 +1,7 @@
+Copyright (c) 2026 Ernest. All rights reserved.
+
+这是个人使用的 Obsidian 插件，不分发、不发布到社区插件市场。
+
+保留所有权利。未经许可不得复制、修改或再分发本项目代码。
+
+第三方依赖各自遵循其原有许可，见 package.json 与 node_modules 中各包自带的 LICENSE。

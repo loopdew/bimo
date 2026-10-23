@@ -1,0 +1,30 @@
+# npm
+node_modules
+
+# build output — what Obsidian actually runs lives in .obsidian/plugins/bimo,
+# which is filled by `npm run deploy`
+dist/*
+
+# source maps
+*.map
+
+# local plugin settings copied into the vault
+data.json
+
+# machine-specific deploy target (absolute path to .obsidian/plugins/bimo)
+.bimo-target
+
+# env files (debug ingest credentials)
+.env
+.env.*
+
+# editor / OS noise
+.vscode
+.idea
+*.iml
+.DS_Store
+
+# test coverage
+coverage/
+.nyc_output/
+*.lcov

@@ -1,0 +1,331 @@
+.ddc_ink_brush-menu {
+    position: relative;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+}
+
+/**
+ * Trigger face: the current stroke, drawn at its real weight, colour and
+ * translucency, above a chevron that says "this opens a menu".
+ *
+ * Built from spans rather than an svg because `.ink_tool-menu button svg`
+ * forces every svg in the circle group to 1.5em — a chevron at that size would
+ * crowd the swatch. The chevron is a rotated border for the same reason.
+ */
+.ddc_ink_brush-trigger {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.22em;
+
+    width: 1.5em;
+    height: 1.5em;
+
+    pointer-events: none;
+}
+
+.ddc_ink_brush-trigger__stroke {
+    display: block;
+    flex: none;
+
+    width: 1.25em;
+    border-radius: 1em;
+}
+
+.ddc_ink_brush-trigger__chevron {
+    display: block;
+    flex: none;
+
+    width: 0.3em;
+    height: 0.3em;
+    border-right: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+    margin-top: -0.1em;
+
+    opacity: 0.8;
+}
+
+/**
+ * The trigger lives in `.ink_tool-menu`, whose `button` rule turns every
+ * descendant into a 2.5em circle. Only the brush tiles need that undone — they
+ * are cards laid out by the panel, not 2.5em buttons.
+ *
+ * The swatch and size controls are deliberately NOT reset here. A blanket
+ * `width/height: auto !important` used to win over their own 1.3em / 2.2em
+ * boxes, collapsing both rows to their 1px borders. That is why the colour
+ * strip and the weight strip read as two thin empty lines at the panel bottom.
+ */
+.ink_tool-menu .ddc_ink_brush-panel button {
+    padding: 0 !important;
+
+    svg {
+        width: auto;
+        height: auto;
+    }
+}
+
+.ink_tool-menu .ddc_ink_brush-panel button.ddc_ink_brush-panel__brush {
+    width: auto !important;
+    height: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    padding: 0.5em 0.1em 0.35em !important;
+    border-radius: 0.55em !important;
+}
+
+.ink_tool-menu button.ddc_ink_brush-panel__size {
+    border-radius: 0.5em !important;
+}
+
+/**
+ * The panel is a sheet of paper, not a dialog.
+ *
+ * Three rules keep it from looking bolted on:
+ *  - one shared grid (4 columns) for the brushes, so the second row centres
+ *    instead of hugging the left edge;
+ *  - no resting background on any control — a button only shows a wash while
+ *    hovered or selected, so the panel reads as ink on paper rather than a
+ *    stack of grey tiles;
+ *  - sections are separated by hairlines, not by invented spacing, which is
+ *    what made the colour row look detached from the brush row.
+ */
+.ddc_ink_brush-panel {
+    position: absolute;
+    top: calc(100% + 0.5em);
+    right: 0;
+    // Above the menu bar (z-index 1000) so an open panel is never painted under
+    // the toolbar or the page content inside a short embed.
+    z-index: 1002;
+    pointer-events: auto;
+
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+
+    width: 17em;
+    max-width: min(17em, 88vw);
+    // A seven-brush panel with swatches is ~20em tall. On a small embed that
+    // overflowed the block and looked like overlapping chrome, so bound it and
+    // let it scroll instead.
+    max-height: min(62vh, 24em);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    padding: 0.3em;
+    background-color: var(--background-primary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 0.85em;
+    // Two shadows: a tight one to define the edge against paper, a wide one for
+    // lift. A single large blur reads as a floating dialog.
+    box-shadow:
+        0 1px 3px rgba(0, 0, 0, 0.08),
+        0 8px 24px -8px rgba(0, 0, 0, 0.24);
+}
+
+.ddc_ink_brush-panel__section {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    // `center` is what makes the trailing row of three brushes sit under the
+    // middle of the first row instead of leaving a hole on the right.
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.2em;
+
+    padding: 0.4em 0.25em;
+
+    // One hairline under the brush grid separates "which instrument" from
+    // "which ink". A rule between colour and size would be a second, useless
+    // division — those two belong to the same decision.
+    &:nth-child(2) {
+        border-top: 1px solid var(--background-modifier-border);
+    }
+
+    /*
+     * Both rows now share one inline padding and one rhythm. The colour dots
+     * spread across the full panel width instead of hugging the left edge, and
+     * the three weight steps divide that same width into equal thirds — which
+     * also lines their left and right edges up with the brush grid above.
+     */
+    &--swatches {
+        justify-content: space-between;
+        gap: 0.4em;
+        padding-inline: 0.6em;
+        padding-block: 0.7em;
+    }
+
+    &--sizes {
+        gap: 0.35em;
+        padding-inline: 0.6em;
+        padding-block: 0.5em;
+    }
+}
+
+/**
+ * `button.` is required: Obsidian's own button rule sets a rest background and
+ * a box-shadow, and a bare class selector loses to it. That is why every brush
+ * used to render as a grey tile.
+ */
+button.ddc_ink_brush-panel__brush {
+    flex: 0 0 calc(25% - 0.2em);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45em;
+
+    // Tall enough for the 11px highlighter band plus its label.
+    min-height: 3.7em;
+    padding: 0.5em 0.1em 0.35em;
+    height: auto;
+
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.55em;
+    box-shadow: none;
+    cursor: pointer;
+
+    &:hover {
+        background-color: var(--background-modifier-hover);
+        box-shadow: none;
+    }
+
+    &.is-active {
+        background-color: var(--background-modifier-hover);
+        border-color: var(--background-modifier-border-focus, var(--background-modifier-border));
+    }
+}
+
+/**
+ * Every swatch draws the brush it stands for: its real length, weight and
+ * head shape. The previous version scaled height by `sizeMultiplier * 2.4` and
+ * clamped at 2px, which made fountain pen, pencil and technical pen three
+ * identical grey bars — the one thing a brush picker must not do.
+ *
+ * Weight is now set per brush instead of derived, because the presets differ
+ * by texture as much as by thickness (a technical pen and a crayon are not
+ * "0.8x and 1.5x" to the eye). Colour and opacity stay inline, since the
+ * highlighter ships its own yellow.
+ */
+.ddc_ink_brush-panel__stroke {
+    display: block;
+    border-radius: 1em;
+    background-color: var(--text-normal);
+
+    &[data-brush='technical'] {
+        width: 54%;
+        height: 1.5px;
+        border-radius: 0.2em;
+    }
+
+    &[data-brush='pen'] {
+        width: 70%;
+        height: 2.5px;
+    }
+
+    &[data-brush='pencil'] {
+        width: 64%;
+        height: 1.8px;
+        border-radius: 0.4em;
+    }
+
+    &[data-brush='crayon'] {
+        width: 78%;
+        height: 4.5px;
+        border-radius: 0.45em;
+    }
+
+    // Tapered tip: thin where the nib starts, full where the body pulls.
+    &[data-brush='brush'] {
+        width: 80%;
+        height: 6px;
+        border-radius: 70% 12% 12% 70% / 50% 50% 50% 50%;
+    }
+
+    &[data-brush='marker'] {
+        width: 88%;
+        height: 7px;
+        border-radius: 0.25em;
+    }
+
+    // Deliberately the widest and thinnest-looking band: it is a wash, not ink.
+    &[data-brush='highlighter'] {
+        width: 100%;
+        height: 11px;
+        border-radius: 0.3em;
+    }
+}
+
+.ddc_ink_brush-panel__label {
+    font-size: 0.82em;
+    line-height: 1.1;
+    color: var(--text-normal);
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+}
+
+button.ddc_ink_brush-panel__brush.is-active .ddc_ink_brush-panel__label {
+    font-weight: var(--font-semibold, 600);
+}
+
+button.ddc_ink_brush-panel__swatch {
+    // 1.3em was a 17px dot in a 221px panel — a fifth of the row, with the rest
+    // left empty. At 1.75em the seven dots fill it evenly.
+    width: 1.75em !important;
+    height: 1.75em !important;
+    flex: none;
+    min-width: 0;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--background-modifier-border);
+    box-shadow: none;
+    cursor: pointer;
+
+    &.ddc_ink_brush-panel__swatch--theme {
+        background-color: var(--text-normal);
+    }
+
+    &.is-active {
+        // Ring sits outside the dot so the dot keeps its true colour.
+        outline: 2px solid var(--interactive-accent);
+        outline-offset: 2px;
+    }
+}
+
+button.ddc_ink_brush-panel__size {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    // Three equal thirds rather than three 28px chips bunched at the left.
+    flex: 1 1 0;
+    width: auto !important;
+    height: 2.7em !important;
+    min-height: 2.7em;
+    padding: 0;
+
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 0.5em;
+    box-shadow: none;
+    cursor: pointer;
+
+    &:hover {
+        background-color: var(--background-modifier-hover);
+    }
+
+    &.is-active {
+        border-color: var(--background-modifier-border-focus, var(--background-modifier-border));
+        background-color: var(--background-modifier-hover);
+    }
+}
+
+.ddc_ink_brush-panel__dot {
+    display: block;
+    border-radius: 50%;
+    background-color: var(--text-normal);
+}
+

@@ -1,0 +1,59 @@
+.ink_extended-writing-menu {
+    display: flex;
+    // This container is a sibling of `.ink_other-menu`, which centres its own
+    // children. Without the same alignment the two boxes sit on different
+    // baselines and the row reads as stepped.
+    align-items: center;
+    gap: 4px;
+
+    pointer-events: none;
+
+    button {
+        width: auto;
+        pointer-events: auto;
+        background-color: var(--interactive-normal);
+        color: var(--color-base-60);
+        fill: var(--color-base-60);
+        &:hover {
+            background-color: var(--interactive-hover);
+            color: var(--color-base-100);
+            fill: var(--color-base-100);
+        }
+        &:disabled {
+            cursor: default;
+            color: var(--text-on-accent);
+            fill: var(--text-on-accent);
+            background-color: var(--interactive-accent);
+            &:hover {
+                box-shadow: var(--input-shadow);
+            }
+        }
+    }
+
+    button {
+        width: 2.5em;
+        height: 2.5em;
+        border-radius: 0.8em;
+        padding: 0 !important;
+        
+        /*
+         * The overflow ⋮ ships narrow (1.9em) to save room inside a button
+         * group. Alone in a row beside a full-width ✓ that reads as a
+         * misaligned box, so in this toolbar it takes the standard width.
+         */
+        &.ddc_ink_btn-slim {
+            width: 2.5em;
+            height: 2.5em;
+        }
+
+        svg {
+            width: 1.5em !important;
+            height: 1.5em !important;
+
+            &[fill='none'] {
+                fill: none;
+                stroke: currentColor;
+            }
+        }
+    }
+}

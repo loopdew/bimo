@@ -1,0 +1,12 @@
+// Boox companion layout chrome (embed radius, overflow clip). Visual high-contrast
+// styling lives in ink-grayscale-screen-chrome.scss (highContrastUserInterface).
+
+// Embeds only — dedicated Boox editors stay square and omit overlay corner markers.
+.ddc_ink_resize-container--boox {
+	.ddc_ink_writing-editor,
+	.ddc_ink_drawing-editor {
+		border-radius: 20px;
+		// Clips rounded embed canvas; writing embed overrides overflow on the editor (see writing-editor.scss).
+		overflow: hidden;
+	}
+}

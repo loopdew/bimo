@@ -1,0 +1,193 @@
+@use '../../styles/ink-tertiary-text-link';
+
+.notice:has(.ddc_ink_notice),
+.notice.ddc_ink_notice {
+    // Make mobile notifications consistent with reliable contrast
+    border-radius: var(--radius-m) !important;
+    background-color: var(--background-primary-alt) !important;
+    border: solid 1px var(--background-modifier-border) !important;
+    box-shadow: 0 2px 8px var(--background-modifier-box-shadow) !important;
+
+    // Cap height so footer actions stay on screen; tune inset after visual check
+    --ddc_ink_notice-viewport-inset: 5rem;
+    --ddc_ink_notice-content-padding: var(--size-4-4);
+    max-height: calc(100dvh - var(--ddc_ink_notice-viewport-inset)) !important;
+    height: fit-content !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+
+    // Forcing explicitly clicking a button to dismiss
+    pointer-events: none;
+}
+
+.ddc_ink_notice {
+    text-align: left !important;
+    display: flex;
+    flex-direction: column;
+    height: fit-content;
+    max-height: calc(100dvh - var(--ddc_ink_notice-viewport-inset));
+    min-height: 0;
+    overflow: hidden;
+    width: 100%;
+    padding: 0 !important;
+    margin: 0 !important;
+
+    .ddc_ink_notice-scroll {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: var(--ddc_ink_notice-content-padding);
+        padding-block-end: var(--size-4-2);
+        pointer-events: auto;
+    }
+
+    .ddc_ink_notice-footer {
+        flex-shrink: 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 1em;
+        padding: var(--ddc_ink_notice-content-padding);
+        pointer-events: auto;
+    }
+
+    .ddc_ink_notice-footer-links {
+        flex-shrink: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35em;
+
+        a {
+            pointer-events: all;
+            font-size: var(--font-ui-small);
+            line-height: var(--font-ui-small);
+            display: inline-flex;
+            align-items: center;
+        }
+    }
+    
+    p.ddc_ink_notice-label {
+        color: var(--text-faint);
+        font-size: var(--font-small);
+        margin: 0;
+        padding: 0;
+    }
+
+    h1 {
+        margin-block-start: 0.1em;
+        color: var(--text-accent);
+    }
+    h2 {
+        margin-block-end: 0.1em;
+        font-size: calc(var(--font-text-size) * 1.1);
+    }
+    p {
+        font-size: var(--font-text-size);
+        color: var(--text-normal);
+    }
+    // Shared “command / shortcut” chrome — blockquote for standalone tips, q for inline in lists.
+    blockquote,
+    q.ddc_ink_notice-inline-quote {
+        color: var(--text-accent);
+        background-color: var(--background-primary);
+        border-radius: var(--button-radius);
+        outline: solid 1px var(--background-modifier-border);
+        box-shadow: inset 0px 0px 8px var(--background-modifier-box-shadow),
+                    0px 0px 8px var(--background-modifier-box-shadow)
+                    !important;
+    }
+    blockquote {
+        font-size: var(--font-text-size);
+        padding: 0.5em 0.8em;
+        margin-inline: 0;
+        display: block;
+    }
+    q.ddc_ink_notice-inline-quote {
+        // Match surrounding list/paragraph text — do not force --font-text-size (often larger in li).
+        font-size: inherit;
+        display: inline;
+        padding: 0.1em 0.45em;
+        margin-inline: 0.15em;
+        quotes: none;
+        white-space: nowrap;
+    }
+    ul, ol {
+        padding-inline-start: 1em;
+        list-style-position: outside;
+        li {
+            margin-block-end: 1ch;
+            color: var(--text-normal);
+            &::marker {
+                color: var(--text-accent);
+            }
+        }        
+    }
+
+    .ddc_ink_notice-body-cta-row {
+        margin-block: 0.85em 0.35em;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: var(--size-4-2);
+
+        button.ddc_ink_primary-btn,
+        a.ddc_ink_tertiary-text-link {
+            pointer-events: all;
+        }
+
+        &--stacked {
+            flex-direction: column;
+            align-items: flex-start;
+            flex-wrap: nowrap;
+            gap: 0;
+        }
+
+        &--centered {
+            align-items: center;
+            text-align: center;
+        }
+    }
+
+    button.ddc_ink_primary-btn {
+        color: var(--text-on-accent);
+        background-color: var(--interactive-accent);
+
+        &:hover {
+            background-color: var(--interactive-accent-hover);
+        }
+    }
+
+    .ddc_ink_notice-footer:not(:has(.ddc_ink_notice-footer-links)) .ddc_ink_notice-cta-bar {
+        width: 100%;
+    }
+
+    .ddc_ink_notice-cta-bar {
+        display: flex;
+        flex-shrink: 0;
+        flex-direction: row-reverse;
+        justify-content: space-between;
+        gap: var(--size-4-2);
+        
+        button {
+            pointer-events: all;
+
+            &.ddc_ink_tertiary-btn {
+                @include ink-tertiary-text-link.ink-tertiary-text-link-chrome;
+                text-decoration: none;
+                background: none;
+                box-shadow: none;
+                margin-inline: 0;
+                padding-inline: 0;
+                padding-block: 0 !important;
+                display: inline-flex;
+                align-items: center;
+
+                &:hover {
+                    text-decoration: underline;
+                }
+            }
+        }
+    }
+}

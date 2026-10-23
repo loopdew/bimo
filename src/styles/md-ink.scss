@@ -1,0 +1,319 @@
+/*!
+ * Ink painted directly on a Markdown note.
+ *
+ * The layer is inert by default: `pointer-events: none` means text selection,
+ * scrolling and editing behave exactly as if it were not there. Only a drawing
+ * tool flips it to `auto`, which is also when the editor stops receiving
+ * pointer events — you cannot have a pen and a text cursor on the same pixel.
+ */
+
+.bimo-md-ink-layer {
+	position: absolute;
+	top: 0;
+	left: 0;
+	z-index: 3;
+	/* Size is set from JS to the content's scroll extent so strokes drawn past
+	   the last line are still inside the SVG's own box. */
+	pointer-events: none;
+	user-select: none;
+	-webkit-user-select: none;
+	touch-action: none;
+}
+
+.bimo-md-ink-svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+}
+
+/* ── Cursors ─────────────────────────────────────────────────── */
+
+/*
+ * The rules below are what actually hands the pointer to the layer. Without
+ * `pointer-events: auto` the layer stays inert no matter which tool is picked —
+ * the class flips, the cursor changes, and every stroke is swallowed by the
+ * editor underneath.
+ */
+.bimo-md-ink-layer[data-tool='pen'],
+.bimo-md-ink-layer[data-tool='highlighter'],
+.bimo-md-ink-layer[data-tool='eraser'],
+.bimo-md-ink-layer[data-tool='lasso'] {
+	pointer-events: auto;
+}
+
+.bimo-md-ink-layer[data-tool='pen'],
+.bimo-md-ink-layer[data-tool='highlighter'] {
+	cursor: crosshair;
+}
+
+.bimo-md-ink-layer[data-tool='eraser'] {
+	cursor: cell;
+}
+
+.bimo-md-ink-layer[data-tool='lasso'] {
+	cursor: default;
+}
+
+/* ── Ink ─────────────────────────────────────────────────────── */
+
+.bimo-md-ink-strokes path {
+	/* Strokes are filled outlines from perfect-freehand, never stroked. */
+	stroke: none;
+	pointer-events: none;
+}
+
+.bimo-md-ink-strokes path.is-selected {
+	/* A halo, not a box: the lasso needs to show which strokes will move
+	   without painting over them. */
+	filter: drop-shadow(0 0 2px var(--interactive-accent))
+		drop-shadow(0 0 4px var(--interactive-accent));
+}
+
+.bimo-md-ink-live {
+	stroke: none;
+	pointer-events: none;
+}
+
+/* ── Pen reticle ─────────────────────────────────────────────── */
+
+/*
+ * Same radius the eraser actually tests against, so what you see is what gets
+ * erased. Drawn in `currentColor` of the theme's muted text: visible on both
+ * light and dark backgrounds without competing with the ink itself.
+ */
+.bimo-md-ink-reticle {
+	fill: none;
+	stroke: var(--text-muted);
+	stroke-opacity: 0.55;
+	stroke-width: 1;
+	pointer-events: none;
+}
+
+/* ── Lasso ───────────────────────────────────────────────────── */
+
+.bimo-md-ink-lasso {
+	fill: var(--interactive-accent);
+	fill-opacity: 0.08;
+	stroke: var(--interactive-accent);
+	stroke-width: 1;
+	stroke-dasharray: 4 3;
+	pointer-events: none;
+}
+
+/* ── Paper ───────────────────────────────────────────────────── */
+
+.bimo-md-ink-paper-line {
+	stroke: var(--text-faint);
+	stroke-opacity: 0.28;
+	stroke-width: 1;
+	shape-rendering: crispEdges;
+	pointer-events: none;
+}
+
+.bimo-md-ink-paper-dot {
+	fill: var(--text-faint);
+	fill-opacity: 0.4;
+	pointer-events: none;
+}
+
+/* While a drawing tool is active the caret would be a lie: nothing you click
+   will move it. Hiding it removes the misleading blink. */
+body:has(.bimo-md-ink-layer[data-tool='pen']) .cm-editor .cm-cursor,
+body:has(.bimo-md-ink-layer[data-tool='highlighter']) .cm-editor .cm-cursor,
+body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
+	opacity: 0;
+}
+
+/* ── Floating pill ───────────────────────────────────────────── */
+
+/*
+ * Sits in the editor's own corner, not the layer's: the layer scrolls with the
+ * text and the pill must not. Faint until the note is hovered, so a page of
+ * writing does not grow a permanent toolbar.
+ */
+/*
+ * Fixed, not absolute, and positioned from JS.
+ *
+ * `.cm-editor` is as tall as the document, so an absolutely positioned pill
+ * anchored to its top scrolls out of view the moment the user moves past the
+ * first screen — which reads as "the toolbar disappeared". Fixed keeps it in
+ * the viewport; JS sets its coordinates so it still starts at the corner of
+ * *this* editor rather than the corner of the window.
+ */
+.bimo-md-ink-pill {
+	position: fixed;
+	top: 0;
+	left: 0;
+	/* Hosted on `document.body`, so this competes with workspace chrome rather
+	   than only with the editor. Below Obsidian's own menus (1000+) on purpose. */
+	z-index: 40;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 3px 5px;
+	border-radius: 999px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	/* Discoverable at a glance. 0.3 read as "not there" for a first-time user
+	   and buried the only control that turns the feature on. */
+	opacity: 0.7;
+	transition: opacity 120ms ease;
+	/* The pill body is a drag handle; its buttons keep their own cursor. */
+	cursor: grab;
+	touch-action: none;
+	/* Dragging must never select the note text underneath. */
+	user-select: none;
+}
+
+.bimo-md-ink-pill.is-dragging {
+	cursor: grabbing;
+	opacity: 1;
+	/* Nothing animates `left`/`top`, but a hover transition on a moving element
+	   still costs a composited layer per frame. */
+	transition: none;
+}
+
+/* The pill lives on `document.body`, so `.cm-editor:hover` can no longer reach
+   it — its own hover state is what brightens it now. */
+.bimo-md-ink-pill:hover,
+.bimo-md-ink-pill:focus-within,
+.bimo-md-ink-pill.is-live {
+	opacity: 1;
+}
+
+.bimo-md-ink-pill button {
+	position: relative;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.9em;
+	height: 1.9em;
+	min-width: 1.9em;
+	padding: 0;
+	border: none;
+	border-radius: 999px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	line-height: 1;
+	cursor: pointer;
+}
+
+.bimo-md-ink-pill button:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.bimo-md-ink-pill button.is-active {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+/*
+ * One-time nudge. The layer starts on `pan`, so the first stroke a new user
+ * attempts does nothing at all — correctly, because that tool must not swallow
+ * text selection. A slow pulse on the pencil connects "nothing happens" to
+ * "pick the pencil" without a modal in the way.
+ */
+.bimo-md-ink-pill.is-hinting button[data-md-ink-tool='pen'] {
+	animation: bimo-md-ink-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes bimo-md-ink-hint {
+	0%,
+	100% {
+		opacity: 0.45;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+/* Current ink colour, shown on the pen itself. */
+.bimo-md-ink-pill button[data-md-ink-tool='pen']::after {
+	content: '';
+	position: absolute;
+	right: 0.15em;
+	bottom: 0.15em;
+	width: 0.34em;
+	height: 0.34em;
+	border-radius: 50%;
+	background: var(--bimo-md-ink-colour, var(--text-normal));
+	box-shadow: 0 0 0 1px var(--background-secondary);
+}
+
+/* PDF views have their own toolbar across the top; sit below it.
+   `absolute` against the leaf container, which is a fixed-size box, so the pill
+   scrolls with its viewer instead of floating over the whole window. The
+   starting coordinates here are a fallback; `pill-drag.ts` writes `left`/`top`
+   as soon as the pill is attached. */
+.bimo-md-ink-pill--pdf {
+	position: absolute;
+	top: 3.2em;
+	right: 1em;
+	left: auto;
+	opacity: 0.55;
+}
+
+/* The pill is appended to the leaf container, not `.view-content`, so hover is
+   tracked on the pill itself (the generic `:hover` rule above already does it).
+   Kept for the brief window before attachment. */
+.bimo-md-ink-pill--pdf:hover {
+	opacity: 1;
+}
+
+.bimo-md-ink-pill__gap {
+	width: 1px;
+	height: 1.1em;
+	margin: 0 3px;
+	background: var(--background-modifier-border);
+}
+
+/* ── PDF pages ───────────────────────────────────────────────── */
+
+/*
+ * pdf.js positions `.page` itself, so the layer only has to fill it. The SVG is
+ * sized to the page box on every repaint, which is also how a zoom is handled:
+ * the same normalised strokes are re-projected at the new size.
+ */
+.bimo-pdf-ink-svg {
+	user-select: none;
+	-webkit-user-select: none;
+	touch-action: none;
+}
+
+.bimo-pdf-ink-svg[data-tool='pen'],
+.bimo-pdf-ink-svg[data-tool='highlighter'] {
+	cursor: crosshair;
+}
+
+.bimo-pdf-ink-svg[data-tool='eraser'] {
+	cursor: cell;
+}
+
+/* ── Settings swatches ───────────────────────────────────────── */
+
+.bimo_settings-swatches {
+	display: flex;
+	gap: 6px;
+	align-items: center;
+}
+
+.bimo_settings-swatch {
+	width: 1.45em;
+	height: 1.45em;
+	min-width: 1.45em;
+	padding: 0;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: none;
+	cursor: pointer;
+}
+
+.bimo_settings-swatch.is-active {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}

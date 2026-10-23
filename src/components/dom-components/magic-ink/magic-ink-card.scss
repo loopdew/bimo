@@ -1,0 +1,175 @@
+/**
+ * The margin card.
+ *
+ * Visual brief: something that looks like it belongs on the page rather than in
+ * a dialog — warm paper, a hairline rule, and a handwriting-leaning font stack
+ * so the reply reads as marginalia. It still has to be legible over dark themes,
+ * hence the theme-aware background mix instead of a fixed parchment colour.
+ */
+
+.ddc_ink_magic-ink {
+	position: absolute;
+	right: 16px;
+	bottom: 64px;
+	z-index: 1100;
+
+	// Two lines of ~45 CJK characters need room; narrower and every reply wraps
+	// into four lines under the buttons.
+	width: min(24em, 82%);
+	padding: 0.65em 0.8em 0.55em;
+
+	pointer-events: auto;
+	cursor: default;
+
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--background-primary) 92%, #f3e2b8) 0%,
+			color-mix(in srgb, var(--background-primary) 96%, #e9d4a3) 100%
+		);
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, #b9955c);
+	border-radius: 0.55em;
+	box-shadow:
+		0 10px 28px rgba(0, 0, 0, 0.16),
+		0 1px 0 color-mix(in srgb, #fff 20%, transparent) inset;
+
+	opacity: 0;
+	transform: translateY(10px) scale(0.985);
+	// Rises out of the paper rather than popping in: a slight defocus that
+	// settles reads as ink surfacing, which is the whole "magic journal" brief.
+	filter: blur(3px);
+	transition:
+		opacity 0.26s ease-out,
+		transform 0.3s cubic-bezier(0.22, 0.9, 0.3, 1),
+		filter 0.34s ease-out;
+}
+
+.ddc_ink_magic-ink--visible {
+	opacity: 1;
+	transform: translateY(0) scale(1);
+	filter: blur(0);
+}
+
+/** Sit above the toolbar instead of above the bottom bar. */
+.ddc_ink_magic-ink--top {
+	top: 60px;
+	bottom: auto;
+}
+
+.ddc_ink_magic-ink__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5em;
+	margin-bottom: 0.25em;
+}
+
+.ddc_ink_magic-ink__signature {
+	font-size: 0.66em;
+	letter-spacing: 0.08em;
+	color: var(--text-faint);
+	text-transform: uppercase;
+}
+
+.ddc_ink_magic-ink__close {
+	flex: 0 0 auto;
+	width: 1.4em;
+	height: 1.4em;
+	padding: 0;
+	line-height: 1;
+	font-size: 0.9em;
+	color: var(--text-faint);
+	background: transparent;
+	border: none;
+	border-radius: 50%;
+	box-shadow: none;
+
+	&:hover {
+		color: var(--text-normal);
+		background: var(--background-modifier-hover);
+	}
+}
+
+.ddc_ink_magic-ink__body {
+	min-height: 1.4em;
+	padding-top: 0.15em;
+
+	font-size: 0.92em;
+	line-height: 1.55;
+	color: var(--text-normal);
+	white-space: pre-wrap;
+	word-break: break-word;
+
+	// Handwriting-leaning stack: Kai faces first, then the usual CJK fallbacks.
+	font-family:
+		'LXGW WenKai', 'Kaiti SC', 'STKaiti', 'KaiTi', 'Georgia', var(--font-text);
+
+	&--error {
+		color: var(--text-error);
+		font-family: var(--font-text);
+		font-size: 0.84em;
+	}
+
+	&--pending {
+		color: var(--text-faint);
+	}
+}
+
+/** Three dots that breathe while the request is in flight. */
+.ddc_ink_magic-ink__dots {
+	display: inline-block;
+
+	&::after {
+		content: '·  ·  ·';
+		letter-spacing: 0.1em;
+		animation: magic-ink-breathe 1.2s ease-in-out infinite;
+	}
+}
+
+.ddc_ink_magic-ink__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.4em;
+	margin-top: 0.45em;
+
+	&:empty {
+		display: none;
+	}
+}
+
+.ddc_ink_magic-ink__action {
+	padding: 0.15em 0.55em;
+	font-size: 0.74em;
+	color: var(--text-muted);
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 0.4em;
+	box-shadow: none;
+
+	&:hover {
+		color: var(--text-normal);
+		background: var(--background-modifier-hover);
+	}
+}
+
+@keyframes magic-ink-breathe {
+	0%, 100% { opacity: 0.35; }
+	50% { opacity: 1; }
+}
+
+/** The pen toggle in the toolbar. */
+.ink_menu-toggle--magic-active {
+	background-color: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
+	fill: var(--text-on-accent) !important;
+}
+
+.ink_magic-pen-glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5em;
+	height: 1.5em;
+	font-size: 0.95em;
+	line-height: 1;
+}
