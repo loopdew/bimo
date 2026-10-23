@@ -15,7 +15,8 @@ import {
 } from './stroke-viewport-culling';
 import { cropWritingStrokeHeightInvitingly } from 'src/components/formats/current/utils/tldraw-helpers';
 import { WRITING_LINE_HEIGHT, WRITING_PAGE_WIDTH } from 'src/constants';
-import { AddStrokeCommand, EraseAllCommand, RemoveStrokesCommand } from './commands';
+import { AddStrokeCommand, DuplicateStrokesCommand, EraseAllCommand, RemoveStrokesCommand, RestyleStrokesCommand } from './commands';
+import { attachTouchTapUndo } from 'src/logic/md-ink/touch-tap-undo';
 import { drawToolPointerDown, drawToolPointerMove, drawToolPointerUp, drawToolPointerCancel } from './tools/draw-tool';
 import { eraseToolPointerDown, eraseToolPointerMove, eraseToolPointerUp, eraseToolPointerCancel } from './tools/erase-tool';
 import {
@@ -593,6 +594,13 @@ export function InkSvgCanvas(props: InkSvgCanvasProps): React.JSX.Element {
 			getStrokeStyle: () => ({ ...strokeStyleRef.current }),
 			setStrokeStyle: (partial: Partial<InkStrokeStyle>) => {
 				setStrokeStyle(prev => ({ ...prev, ...partial }));
+				if (
+					toolRef.current === 'select'
+					&& selectedIdsRef.current.size > 0
+					&& partial.color !== undefined
+				) {
+					restyleSelectedStrokesRef.current({ color: partial.color });
+				}
 			},
 
 			getCamera: () => ({ ...cameraRef.current }),
@@ -737,6 +745,43 @@ export function InkSvgCanvas(props: InkSvgCanvasProps): React.JSX.Element {
 	const deleteSelectedStrokesRef = useRef(deleteSelectedStrokes);
 	deleteSelectedStrokesRef.current = deleteSelectedStrokes;
 
+	const duplicateSelectedStrokes = useCallback(() => {
+		const ids = Array.from(selectedIdsRef.current);
+		if (ids.length === 0) return;
+		const now = Date.now().toString(36);
+		const clones: InkStroke[] = [];
+		const nextSelected = new Set<string>();
+		ids.forEach((id, idx) => {
+			const s = storeRef.current.getById(id);
+			if (!s) return;
+			const newId = `dup_${now}_${idx}_${Math.random().toString(36).slice(2, 6)}`;
+			clones.push({
+				id: newId,
+				points: s.points.map((pt) => [...pt] as InkStroke['points'][number]),
+				style: { ...s.style },
+				offset: { x: s.offset.x + 18, y: s.offset.y + 18 },
+			});
+			nextSelected.add(newId);
+		});
+		if (clones.length === 0) return;
+		const cmd = new DuplicateStrokesCommand(storeRef.current, clones);
+		undoManagerRef.current.execute(cmd);
+		setSelectedIds(nextSelected);
+	}, []);
+
+	const duplicateSelectedStrokesRef = useRef(duplicateSelectedStrokes);
+	duplicateSelectedStrokesRef.current = duplicateSelectedStrokes;
+
+	const restyleSelectedStrokes = useCallback((stylePatch: Partial<InkStrokeStyle>) => {
+		const ids = Array.from(selectedIdsRef.current);
+		if (ids.length === 0) return;
+		const cmd = new RestyleStrokesCommand(storeRef.current, ids, stylePatch);
+		undoManagerRef.current.execute(cmd);
+	}, []);
+
+	const restyleSelectedStrokesRef = useRef(restyleSelectedStrokes);
+	restyleSelectedStrokesRef.current = restyleSelectedStrokes;
+
 	const isClientPointOnSelectionChrome = useCallback((clientX: number, clientY: number): boolean => {
 		const containerRect = containerRef.current?.getBoundingClientRect() ?? new DOMRect();
 		const pagePoint = screenToPageFn(cameraRef.current, containerRect, clientX, clientY);
@@ -751,7 +796,14 @@ export function InkSvgCanvas(props: InkSvgCanvasProps): React.JSX.Element {
 
 	const showSelectionContextMenuAt = useCallback((clientX: number, clientY: number) => {
 		showMenuOptionsAtPosition(
-			buildSelectionStrokeContextMenuOptions(() => deleteSelectedStrokesRef.current()),
+			buildSelectionStrokeContextMenuOptions(
+				() => deleteSelectedStrokesRef.current(),
+				{
+					duplicateSelectedStrokes: () => duplicateSelectedStrokesRef.current(),
+					applyCurrentColourToSelection: () =>
+						restyleSelectedStrokesRef.current({ color: strokeStyleRef.current.color }),
+				},
+			),
 			{ x: clientX, y: clientY },
 		);
 	}, []);
@@ -1415,6 +1467,46 @@ export function InkSvgCanvas(props: InkSvgCanvasProps): React.JSX.Element {
 			window.removeEventListener('keydown', handleKeyDown, true);
 			window.removeEventListener('keyup', handleKeyUp, true);
 			window.removeEventListener('blur', handleWindowBlur);
+		};
+	}, []);
+
+	// Selection keyboard shortcuts (Delete/Backspace to delete, Mod+D to duplicate) + Touch 2/3-finger tap Undo/Redo
+	useEffect(() => {
+		const handleSelectionKeyDown = (e: KeyboardEvent) => {
+			if (!isPointerOverCanvasRef.current || selectedIdsRef.current.size === 0) return;
+			const target = e.target as HTMLElement | null;
+			if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+				return;
+			}
+			if (e.key === 'Delete' || e.key === 'Backspace') {
+				e.preventDefault();
+				deleteSelectedStrokesRef.current();
+			} else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+				e.preventDefault();
+				duplicateSelectedStrokesRef.current();
+			}
+		};
+		window.addEventListener('keydown', handleSelectionKeyDown);
+
+		const wrapper = canvasWrapperRef.current;
+		const tapHandle = wrapper
+			? attachTouchTapUndo(wrapper, {
+				onUndo: () => {
+					if (!isBooxInputLockedRef.current && undoManagerRef.current.canUndo()) {
+						undoManagerRef.current.undo();
+					}
+				},
+				onRedo: () => {
+					if (!isBooxInputLockedRef.current && undoManagerRef.current.canRedo()) {
+						undoManagerRef.current.redo();
+					}
+				},
+			})
+			: null;
+
+		return () => {
+			window.removeEventListener('keydown', handleSelectionKeyDown);
+			tapHandle?.destroy();
 		};
 	}, []);
 

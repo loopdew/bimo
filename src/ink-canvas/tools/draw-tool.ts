@@ -16,6 +16,11 @@ import {
 	PEN_PRESSURE_SLEW_PER_SIZE,
 	PEN_PRESSURE_SMOOTHING_ALPHA,
 } from '../constants/pen-input';
+import {
+	HOLD_TO_SNAP_DELAY_MS,
+	HOLD_TO_SNAP_TOLERANCE,
+	snapStrokePoints,
+} from 'src/logic/md-ink/types';
 ///////////////////////////
 ///////////////////////////
 
@@ -57,12 +62,52 @@ interface ActiveStroke {
 	/** `timeStamp` of the last committed (appended) point — used for slow-draw trail commits. */
 	lastCommittedPointAtMs: number;
 	rawSamples: RawStrokeSample[];
+	/** True once holding the pen still at the end of the stroke snapped it to a geometric shape. */
+	snappedByHold?: boolean;
 }
 
 /** When the pen creeps slowly away from the anchor but stays near the tip, append instead of replacing. */
 const SLOW_DRAW_TIP_REPLACE_APPEND_MS = 40;
+/** Screen-space movement threshold (px) that resets the hold-to-snap dwell timer. */
+const HOLD_SNAP_JITTER_PX = 3;
 
 let activeStroke: ActiveStroke | null = null;
+let holdSnapTimer: ReturnType<typeof setTimeout> | null = null;
+let holdAnchorScreen: { x: number; y: number } | null = null;
+
+function clearHoldSnapTimer(): void {
+	if (holdSnapTimer !== null) {
+		clearTimeout(holdSnapTimer);
+		holdSnapTimer = null;
+	}
+	holdAnchorScreen = null;
+}
+
+function scheduleHoldSnap(e: PointerEvent, ctx: DrawToolContext): void {
+	if (!activeStroke || activeStroke.snappedByHold) return;
+	if (
+		holdAnchorScreen
+		&& Math.hypot(e.clientX - holdAnchorScreen.x, e.clientY - holdAnchorScreen.y) <= HOLD_SNAP_JITTER_PX
+		&& holdSnapTimer !== null
+	) {
+		return;
+	}
+	if (holdSnapTimer !== null) {
+		clearTimeout(holdSnapTimer);
+	}
+	holdAnchorScreen = { x: e.clientX, y: e.clientY };
+	holdSnapTimer = setTimeout(() => {
+		holdSnapTimer = null;
+		if (!activeStroke || activeStroke.snappedByHold || activeStroke.points.length < 3) return;
+		const zoom = Math.max(ctx.getCamera().zoom, 0.25);
+		const snapped = snapStrokePoints(activeStroke.points, HOLD_TO_SNAP_TOLERANCE / zoom);
+		if (snapped !== activeStroke.points) {
+			activeStroke.points = snapped;
+			activeStroke.snappedByHold = true;
+			updateLiveStrokePath(ctx);
+		}
+	}, HOLD_TO_SNAP_DELAY_MS);
+}
 
 interface RawStrokeSample {
 	clientX: number;
@@ -121,19 +166,39 @@ export function drawToolPointerDown(e: PointerEvent, ctx: DrawToolContext): void
 		],
 	};
 
+	clearHoldSnapTimer();
 	updateLiveStrokePath(ctx);
 }
 
 export function drawToolPointerMove(e: PointerEvent, ctx: DrawToolContext): void {
 	if (!activeStroke) return;
+	if (activeStroke.snappedByHold) {
+		if (activeStroke.points.length === 2) {
+			const pagePoint = screenToPage(ctx.getCamera(), ctx.getContainerRect(), e.clientX, e.clientY);
+			const pressure = activeStroke.points[1][2];
+			activeStroke.points[1] = [pagePoint.x, pagePoint.y, pressure];
+			updateLiveStrokePath(ctx);
+		}
+		return;
+	}
 	appendDrawSamplesFromPointerEvent(e, ctx, { forceCommitFinalPoint: false });
+	scheduleHoldSnap(e, ctx);
 }
 
 export function drawToolPointerUp(e: PointerEvent, ctx: DrawToolContext): void {
+	clearHoldSnapTimer();
 	if (!activeStroke) return;
 
-	// Final segment on `pointerup` can include the true lift position.
-	appendDrawSamplesFromPointerEvent(e, ctx, { forceCommitFinalPoint: true });
+	if (activeStroke.snappedByHold) {
+		if (activeStroke.points.length === 2) {
+			const pagePoint = screenToPage(ctx.getCamera(), ctx.getContainerRect(), e.clientX, e.clientY);
+			const pressure = activeStroke.points[1][2];
+			activeStroke.points[1] = [pagePoint.x, pagePoint.y, pressure];
+		}
+	} else {
+		// Final segment on `pointerup` can include the true lift position.
+		appendDrawSamplesFromPointerEvent(e, ctx, { forceCommitFinalPoint: true });
+	}
 
 	const isFingerStroke = isFingerPointer(e);
 
@@ -146,7 +211,7 @@ export function drawToolPointerUp(e: PointerEvent, ctx: DrawToolContext): void {
 		ctx.onStrokeInputDetected?.(detected);
 
 		const preference = ctx.getStrokeInputTreatAsPreference();
-		if (preference === 'auto') {
+		if (preference === 'auto' && !activeStroke.snappedByHold) {
 			const recomputed = recomputeStrokeFromRawSamples({
 				rawSamples: activeStroke.rawSamples,
 				detected,
@@ -161,7 +226,7 @@ export function drawToolPointerUp(e: PointerEvent, ctx: DrawToolContext): void {
 		} else {
 			activeStroke.style = buildInkStrokeStyleForTreatAs(
 				ctx.getStrokeStyle(),
-				ctx.getResolvedStrokeInputTreatAs(),
+				preference === 'auto' ? detected : ctx.getResolvedStrokeInputTreatAs(),
 				ctx.getCamera().zoom,
 			);
 		}
@@ -195,6 +260,7 @@ export function drawToolPointerUp(e: PointerEvent, ctx: DrawToolContext): void {
 }
 
 export function drawToolPointerCancel(_e: PointerEvent, ctx: DrawToolContext): void {
+	clearHoldSnapTimer();
 	// Discard the in-progress stroke
 	const livePath = ctx.getLiveStrokePath();
 	if (livePath) livePath.setAttribute('d', '');

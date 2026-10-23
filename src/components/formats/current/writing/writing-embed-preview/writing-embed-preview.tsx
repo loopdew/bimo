@@ -126,7 +126,13 @@ export const WritingEmbedPreview: React.FC<WritingEmbedPreviewProps> = (props) =
         // Prefer vault.read over getResourcePath: react-inlinesvg XHRs app:// URLs, which Electron 39+
         // blocks as cross-origin from app://obsidian.md. Pass raw SVG markup (not a data URI) so we
         // stay on the InlineSVG branch — data: would flip isImg and break dark-theme path CSS.
-        void props.plugin.app.vault.read(props.writingFile).then((svgContent) => {
+        const reader = typeof props.plugin?.app?.vault?.read === 'function'
+            ? (file: TFile) => props.plugin.app.vault.read(file)
+            : typeof props.writingFile.vault?.read === 'function'
+                ? (file: TFile) => props.writingFile!.vault.read(file)
+                : null;
+        if (!reader) return;
+        void Promise.resolve(reader(props.writingFile)).then((svgContent) => {
             if (!svgContent) return;
             setFileSrc(svgContent);
         }).catch(() => {});

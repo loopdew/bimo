@@ -13,7 +13,7 @@ export function useInkFileTranscript(file: TFile | null): string | null {
 	const [transcript, setTranscript] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!file) {
+		if (!file || !file.vault?.read) {
 			setTranscript(null);
 			return;
 		}

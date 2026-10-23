@@ -43,6 +43,9 @@ export function parseMdInkDocument(raw: string, notePath: string): MdInkDocument
 	}
 
 	const candidate = parsed as Partial<MdInkDocument>;
+	if (typeof candidate.notePath === 'string' && candidate.notePath !== '' && candidate.notePath !== notePath) {
+		return createEmptyMdInkDocument(notePath);
+	}
 	const strokes = Array.isArray(candidate.strokes)
 		? candidate.strokes.filter(isUsableStroke)
 		: [];

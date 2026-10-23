@@ -121,4 +121,12 @@ describe('md-ink document round-trip', () => {
 		const restored = parseMdInkDocument(JSON.stringify({ version: 1, paper: 'marble', strokes: [] }), 'a.md');
 		expect(restored.paper).toBe('none');
 	});
+
+	it('returns an empty document when stored notePath mismatches (hash collision guard)', () => {
+		const doc = createEmptyMdInkDocument('notes/Original.md');
+		doc.strokes.push(strokeAtLine(1, 'secret'));
+		const restored = parseMdInkDocument(serializeMdInkDocument(doc), 'notes/Colliding.md');
+		expect(restored.strokes).toHaveLength(0);
+		expect(restored.notePath).toBe('notes/Colliding.md');
+	});
 });

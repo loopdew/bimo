@@ -226,6 +226,16 @@ export function createMdInkExtension(plugin: MyPlugin): Extension {
 						shapeSnap: plugin.settings.mdInkShapeSnap,
 						onChange: () => this.scheduleSave(),
 						onToolSelected: (tool) => plugin.mdInk.setTool(tool),
+						onStyleChange: (patch) => {
+							if (patch.brush !== undefined) plugin.settings.mdInkBrush = patch.brush;
+							if (patch.colour !== undefined) plugin.settings.mdInkColour = patch.colour;
+							if (patch.size !== undefined) plugin.settings.mdInkSize = patch.size;
+							if (patch.paper !== undefined) plugin.settings.mdInkPaper = patch.paper;
+							if (patch.fingerDraws !== undefined) plugin.settings.mdInkFingerDraws = patch.fingerDraws;
+							plugin.mdInk.refreshOptions(patch);
+							void plugin.saveSettings();
+						},
+						getAiSettings: () => plugin.settings.customTranscriptionProvider,
 					},
 				);
 				// Inherit the tool the user last chose; a new note must not silently
@@ -358,6 +368,7 @@ export function nudgeAllEditors(plugin: MyPlugin): number {
 export function watchActiveNotes(plugin: MyPlugin): void {
 	const nudge = (): void => {
 		if (!plugin.settings.mdInkEnabled) return;
+		plugin.mdInk?.reclampPills?.();
 		const active = plugin.app.workspace.getActiveViewOfType(MarkdownView);
 		const editor = active?.editor as unknown as { cm?: EditorView } | undefined;
 		const cm = editor?.cm;

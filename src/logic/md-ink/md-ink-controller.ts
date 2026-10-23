@@ -199,6 +199,11 @@ export class MdInkController {
 		for (const [, overlay] of this.entries()) overlay.setPaper(paper);
 	}
 
+	/** Reclamp every mounted note pill (e.g. after switching tabs or resizing panes). */
+	reclampPills(): void {
+		for (const [, overlay] of this.entries()) overlay.reclampPill();
+	}
+
 	/**
 	 * One line describing what is actually mounted.
 	 *

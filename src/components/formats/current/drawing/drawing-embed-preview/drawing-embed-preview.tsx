@@ -122,7 +122,16 @@ export const DrawingEmbedPreview: React.FC<DrawingEmbedPreviewProps> = (props) =
         // Prefer vault.read over getResourcePath: react-inlinesvg XHRs app:// URLs, which Electron 39+
         // blocks as cross-origin from app://obsidian.md. Pass raw SVG markup so InlineSVG inlines
         // into the DOM (theme CSS can restyle paths) without any network fetch.
-        void plugin.app.vault.read(props.embeddedFile).then((svgContent) => {
+        const reader = typeof plugin?.app?.vault?.read === 'function'
+            ? (file: TFile) => plugin.app.vault.read(file)
+            : typeof props.embeddedFile.vault?.read === 'function'
+                ? (file: TFile) => props.embeddedFile!.vault.read(file)
+                : null;
+        if (!reader) {
+            setFileSrc(null);
+            return;
+        }
+        void Promise.resolve(reader(props.embeddedFile)).then((svgContent) => {
             if (!svgContent) {
                 setFileSrc(null);
                 return;

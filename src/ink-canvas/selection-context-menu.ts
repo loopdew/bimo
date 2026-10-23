@@ -9,17 +9,35 @@ import type { InkTool } from './types';
 export const SELECTION_CONTEXT_MENU_LONG_PRESS_MS = 500;
 export const SELECTION_CONTEXT_MENU_LONG_PRESS_MOVE_THRESHOLD_PX = 10;
 
+export interface SelectionStrokeExtraActions {
+	duplicateSelectedStrokes?: () => void;
+	applyCurrentColourToSelection?: () => void;
+}
+
 /** Obsidian menu shown when the user invokes a menu on the selection chrome. */
 export function buildSelectionStrokeContextMenuOptions(
 	deleteSelectedStrokes: () => void,
+	extraActions?: SelectionStrokeExtraActions,
 ): MenuOption[] {
-	return [
-		{
-			text: t('Delete'),
-			destructive: true,
-			action: deleteSelectedStrokes,
-		},
-	];
+	const options: MenuOption[] = [];
+	if (extraActions?.duplicateSelectedStrokes) {
+		options.push({
+			text: t('Duplicate'),
+			action: extraActions.duplicateSelectedStrokes,
+		});
+	}
+	if (extraActions?.applyCurrentColourToSelection) {
+		options.push({
+			text: t('Apply brush colour'),
+			action: extraActions.applyCurrentColourToSelection,
+		});
+	}
+	options.push({
+		text: t('Delete'),
+		destructive: true,
+		action: deleteSelectedStrokes,
+	});
+	return options;
 }
 
 /** True when a page-space point lies on the active selection frame (not just on ink). */

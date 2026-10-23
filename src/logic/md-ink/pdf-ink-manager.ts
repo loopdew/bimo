@@ -1,8 +1,10 @@
 import { Notice, setIcon, type App, type TFile } from 'obsidian';
+import { t } from 'src/i18n';
 import type MyPlugin from 'src/main';
 import { PdfInkOverlay } from './pdf-ink-overlay';
 import { createEmptyPdfInkDocument, type PdfInkDocument } from './pdf-ink-types';
 import { attachPillDrag, type PillDragHandle } from './pill-drag';
+import { createPillStylePopover, type PillStylePatch, type PillStylePopoverHandle } from './pill-style-popover';
 
 ///////////////////////////
 ///////////////////////////
@@ -37,6 +39,9 @@ export function pdfInkFilePath(pdfPath: string): string {
 export function parsePdfInkDocument(raw: string, pdfPath: string): PdfInkDocument {
 	try {
 		const parsed = JSON.parse(raw) as Partial<PdfInkDocument>;
+		if (typeof parsed.pdfPath === 'string' && parsed.pdfPath !== '' && parsed.pdfPath !== pdfPath) {
+			return createEmptyPdfInkDocument(pdfPath);
+		}
 		const strokes = Array.isArray(parsed.strokes)
 			? parsed.strokes.filter((s) => s && typeof s.id === 'string' && Array.isArray(s.points) && typeof s.page === 'number')
 			: [];
@@ -53,6 +58,8 @@ interface AttachedPdf {
 	pill: HTMLElement | null;
 	/** Owns the window listeners an active drag installs. */
 	pillDrag: PillDragHandle | null;
+	stylePopover: PillStylePopoverHandle | null;
+	syncPill?: () => void;
 	/** Kept so a rebuilt viewer subtree can be re-hosted by repairPills. */
 	host: HTMLElement | null;
 }
@@ -62,25 +69,34 @@ interface AttachedPdf {
  *
  * Obsidian has no editor extension for PDFs, so this is plain DOM on the view
  * container. It mirrors the note pill's markup and classes rather than sharing
- * code: the two have different hosts, lifetimes and available actions (a PDF
- * has no per-page undo stack), and a shared abstraction would be mostly
- * conditionals.
+ * code: the two have different hosts and lifetimes.
  */
 function createPdfPill(
 	host: HTMLElement,
 	getTool: () => string,
 	onSelect: (tool: string) => void,
+	getStyleState: () => {
+		brush: import('src/ink-canvas/brush-presets').InkBrushKind;
+		colour: string;
+		size: number;
+		fingerDraws?: boolean;
+	},
+	onStyleChange: (patch: PillStylePatch) => void,
+	overlay: PdfInkOverlay,
 	onClear: () => void,
-): { pill: HTMLElement; drag: PillDragHandle } {
+): { pill: HTMLElement; drag: PillDragHandle; stylePopover: PillStylePopoverHandle; syncPill: () => void } {
 	const pill = document.createElement('div');
 	pill.className = 'bimo-md-ink-pill bimo-md-ink-pill--pdf';
 
 	const tools: Array<{ tool: string; icon: string; label: string }> = [
-		{ tool: 'pen', icon: 'pencil', label: 'Pen' },
-		{ tool: 'highlighter', icon: 'highlighter', label: 'Highlighter' },
-		{ tool: 'eraser', icon: 'eraser', label: 'Eraser' },
-		{ tool: 'pan', icon: 'hand', label: 'Pan' },
+		{ tool: 'pen', icon: 'pencil', label: t('Pen') },
+		{ tool: 'highlighter', icon: 'highlighter', label: t('Highlighter') },
+		{ tool: 'eraser', icon: 'eraser', label: t('Eraser') },
+		{ tool: 'lasso', icon: 'lasso', label: t('Lasso') },
+		{ tool: 'pan', icon: 'hand', label: t('Pan') },
 	];
+
+	let stylePopover: PillStylePopoverHandle | null = null;
 
 	for (const { tool, icon, label } of tools) {
 		const button = document.createElement('button');
@@ -89,34 +105,97 @@ function createPdfPill(
 		button.dataset.mdInkTool = tool;
 		button.classList.toggle('is-active', getTool() === tool);
 		setIcon(button, icon);
+		button.addEventListener('pointerdown', (event) => event.stopPropagation());
 		button.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
+			stylePopover?.close();
 			onSelect(tool);
-			for (const other of Array.from(pill.querySelectorAll<HTMLButtonElement>('[data-md-ink-tool]'))) {
-				other.classList.toggle('is-active', other.dataset.mdInkTool === tool);
-			}
-			pill.classList.toggle('is-live', tool !== 'pan');
+			syncPill();
 		});
 		pill.appendChild(button);
 	}
+
+	stylePopover = createPillStylePopover({
+		pill,
+		showPaper: false,
+		getState: getStyleState,
+		onChange: (patch) => {
+			onStyleChange(patch);
+			if (patch.brush !== undefined) {
+				const targetTool = patch.brush === 'highlighter' ? 'highlighter' : 'pen';
+				onSelect(targetTool);
+			}
+			syncPill();
+		},
+	});
+	pill.appendChild(stylePopover.button);
 
 	const gap = document.createElement('span');
 	gap.className = 'bimo-md-ink-pill__gap';
 	pill.appendChild(gap);
 
+	const undo = document.createElement('button');
+	undo.type = 'button';
+	undo.dataset.mdInkAction = 'undo';
+	undo.title = t('Undo ink stroke');
+	setIcon(undo, 'undo-2');
+	undo.addEventListener('pointerdown', (event) => event.stopPropagation());
+	undo.addEventListener('click', (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		overlay.undo();
+		syncPill();
+	});
+	pill.appendChild(undo);
+
+	const redo = document.createElement('button');
+	redo.type = 'button';
+	redo.dataset.mdInkAction = 'redo';
+	redo.title = t('Redo ink stroke');
+	setIcon(redo, 'redo-2');
+	redo.addEventListener('pointerdown', (event) => event.stopPropagation());
+	redo.addEventListener('click', (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		overlay.redo();
+		syncPill();
+	});
+	pill.appendChild(redo);
+
 	const clear = document.createElement('button');
 	clear.type = 'button';
-	clear.title = 'Clear ink on this PDF';
+	clear.dataset.mdInkAction = 'clear';
+	clear.title = t('Clear all ink on open PDFs');
 	setIcon(clear, 'trash-2');
+	clear.addEventListener('pointerdown', (event) => event.stopPropagation());
 	clear.addEventListener('click', (event) => {
 		event.preventDefault();
 		event.stopPropagation();
 		onClear();
+		syncPill();
 	});
 	pill.appendChild(clear);
 
-	pill.classList.toggle('is-live', getTool() !== 'pan');
+	function syncPill(): void {
+		const activeTool = getTool();
+		for (const other of Array.from(pill.querySelectorAll<HTMLButtonElement>('[data-md-ink-tool]'))) {
+			other.classList.toggle('is-active', other.dataset.mdInkTool === activeTool);
+		}
+		pill.classList.toggle('is-live', activeTool !== 'pan');
+		const styleState = getStyleState();
+		const colour = styleState.colour === 'currentColor' ? 'var(--text-normal)' : styleState.colour;
+		pill.style.setProperty('--bimo-md-ink-colour', colour);
+		const canUndo = overlay.canUndo();
+		undo.disabled = !canUndo;
+		undo.classList.toggle('is-disabled', !canUndo);
+		const canRedo = overlay.canRedo();
+		redo.disabled = !canRedo;
+		redo.classList.toggle('is-disabled', !canRedo);
+		stylePopover?.sync();
+	}
+
+	syncPill();
 	host.appendChild(pill);
 	// Absolute coordinates against the leaf container: the PDF pill belongs to
 	// its viewer, and scrolling the page must not leave it behind in the window.
@@ -130,7 +209,7 @@ function createPdfPill(
 			top: 52,
 		}),
 	});
-	return { pill, drag };
+	return { pill, drag, stylePopover, syncPill };
 }
 
 export class PdfInkManager {
@@ -181,6 +260,17 @@ export class PdfInkManager {
 		}
 	}
 
+	/** Remove persisted ink when a PDF is deleted from the vault. */
+	async removeInk(pdfPath: string): Promise<void> {
+		const adapter = this.app.vault.adapter;
+		const path = pdfInkFilePath(pdfPath);
+		try {
+			if (await adapter.exists(path)) await adapter.remove(path);
+		} catch (error) {
+			console.warn('[bimo] pdf-ink remove failed', pdfPath, error);
+		}
+	}
+
 	constructor(private readonly plugin: MyPlugin) {}
 
 	start(): void {
@@ -196,7 +286,10 @@ export class PdfInkManager {
 	setTool(tool: 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'pan'): void {
 		// The slot exists before the overlay does: attaching reads the ink file
 		// from disk first, and a tool click can land inside that window.
-		for (const entry of this.attached.values()) entry.overlay?.setOptions({ tool });
+		for (const entry of this.attached.values()) {
+			entry.overlay?.setOptions({ tool });
+			entry.syncPill?.();
+		}
 	}
 
 	/** The master switch in settings hiding the feature. */
@@ -206,7 +299,10 @@ export class PdfInkManager {
 	}
 
 	refreshOptions(patch: Parameters<PdfInkOverlay['setOptions']>[0]): void {
-		for (const entry of this.attached.values()) entry.overlay?.setOptions(patch);
+		for (const entry of this.attached.values()) {
+			entry.overlay?.setOptions(patch);
+			entry.syncPill?.();
+		}
 	}
 
 	/**
@@ -321,6 +417,7 @@ export class PdfInkManager {
 			timer: null,
 			pill: null,
 			pillDrag: null,
+			stylePopover: null,
 			host: null,
 		};
 		this.attached.set(key, placeholder);
@@ -341,7 +438,10 @@ export class PdfInkManager {
 				eraserRadius: this.plugin.settings.mdInkEraserRadius,
 				shapeSnap: this.plugin.settings.mdInkShapeSnap,
 				tool: this.plugin.mdInk.tool,
-				onChange: () => this.scheduleSave(placeholder),
+				onChange: () => {
+					placeholder.syncPill?.();
+					this.scheduleSave(placeholder);
+				},
 			},
 			doc,
 		);
@@ -362,13 +462,30 @@ export class PdfInkManager {
 			host,
 			() => this.plugin.mdInk.tool,
 			(tool) => this.plugin.mdInk.setTool(tool as 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'pan'),
+			() => ({
+				brush: this.plugin.settings.mdInkBrush,
+				colour: this.plugin.settings.mdInkColour,
+				size: this.plugin.settings.mdInkSize,
+				fingerDraws: this.plugin.settings.mdInkFingerDraws,
+			}),
+			(patch) => {
+				if (patch.brush !== undefined) this.plugin.settings.mdInkBrush = patch.brush;
+				if (patch.colour !== undefined) this.plugin.settings.mdInkColour = patch.colour;
+				if (patch.size !== undefined) this.plugin.settings.mdInkSize = patch.size;
+				if (patch.fingerDraws !== undefined) this.plugin.settings.mdInkFingerDraws = patch.fingerDraws;
+				this.plugin.mdInk.refreshOptions(patch);
+				void this.plugin.saveSettings();
+			},
+			overlay,
 			() => {
 				overlay.clearAll();
-				new Notice('PDF ink cleared.');
+				new Notice(t('PDF ink cleared.'));
 			},
 		);
 		placeholder.pill = pillParts.pill;
 		placeholder.pillDrag = pillParts.drag;
+		placeholder.stylePopover = pillParts.stylePopover;
+		placeholder.syncPill = pillParts.syncPill;
 	}
 
 	private detach(key: string): void {
@@ -376,6 +493,8 @@ export class PdfInkManager {
 		if (!entry) return;
 		this.flush(entry);
 		entry.overlay?.destroy();
+		entry.stylePopover?.destroy();
+		entry.stylePopover = null;
 		entry.pillDrag?.destroy();
 		entry.pillDrag = null;
 		entry.pill?.remove();
@@ -462,6 +581,39 @@ export class PdfInkManager {
 	}
 
 	clearActive(): void {
-		for (const entry of this.attached.values()) entry.overlay?.clearAll();
+		for (const entry of this.attached.values()) {
+			entry.overlay?.clearAll();
+			entry.syncPill?.();
+		}
+	}
+
+	private activeEntry(): AttachedPdf | null {
+		const activeFile = this.app.workspace.getActiveFile();
+		if (activeFile?.extension === 'pdf') {
+			for (const entry of this.attached.values()) {
+				if (entry.filePath === activeFile.path && entry.overlay) return entry;
+			}
+		}
+		let last: AttachedPdf | null = null;
+		for (const entry of this.attached.values()) {
+			if (entry.overlay) last = entry;
+		}
+		return last;
+	}
+
+	undoActive(): boolean {
+		const entry = this.activeEntry();
+		if (!entry?.overlay?.canUndo()) return false;
+		const ok = entry.overlay.undo();
+		entry.syncPill?.();
+		return ok;
+	}
+
+	redoActive(): boolean {
+		const entry = this.activeEntry();
+		if (!entry?.overlay?.canRedo()) return false;
+		const ok = entry.overlay.redo();
+		entry.syncPill?.();
+		return ok;
 	}
 }

@@ -161,7 +161,7 @@ describe('convertDrawInkCanvasDataToWrite', () => {
 		const output = buildFileStr(converted);
 
 		expect(output).toContain('file-type="inkWriting"');
-		expect(output).toMatch(/<line[^>]+stroke-opacity="0\.5"/);
+		expect(output).toMatch(/<line[^>]+stroke-opacity="0\.3"/);
 		expect(extractInkJsonFromSvg(output)?.inkCanvas?.writingLineHeight).toBe(
 			WRITING_LINE_HEIGHT,
 		);

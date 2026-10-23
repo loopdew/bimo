@@ -1,7 +1,7 @@
 import { Editor, Notice, TFile, moment } from 'obsidian';
 import InkPlugin from 'src/main';
 import { t } from 'src/i18n';
-import { requestFigureSpec, type FigureSpec } from './figure';
+import { parseDirectFigureSpec, requestFigureSpec, type FigureSpec } from './figure';
 import { isAiEndpointUsable } from './client';
 import { buildFigureSvg, sampleFigure } from './expression';
 import { resolveInkRootFolder } from 'src/logic/pdf/pdf-paths';
@@ -67,12 +67,14 @@ export async function insertFigureFromPrompt(
 	editor: Editor,
 	userText: string,
 ): Promise<FigureInsertOutcome> {
-	const provider = plugin.settings.customTranscriptionProvider;
-	if (!isAiEndpointUsable(provider)) {
-		return { ok: false, reason: t('Enable a custom API in settings first.') };
+	let spec: FigureSpec | null = parseDirectFigureSpec(userText);
+	if (!spec) {
+		const provider = plugin.settings.customTranscriptionProvider;
+		if (!isAiEndpointUsable(provider)) {
+			return { ok: false, reason: t('Enable a custom API in settings first.') };
+		}
+		spec = await requestFigureSpec(provider, userText);
 	}
-
-	const spec = await requestFigureSpec(provider, userText);
 	if (!spec) {
 		return { ok: false, reason: t('The model did not return a usable function.') };
 	}

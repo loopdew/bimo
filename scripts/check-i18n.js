@@ -31,7 +31,7 @@ function walk(dir, out) {
 	return out;
 }
 
-const dictSource = fs.readFileSync(path.join(srcRoot, 'i18n', 'zh-cn.ts'), 'utf8');
+const dictSource = fs.readFileSync(path.join(srcRoot, 'i18n', 'zh-cn.ts'), 'utf8').replace(/\r\n/g, '\n');
 const known = new Set();
 // Matches both `'key': 'value',` and multi-line `'key':\n\t'value',`
 // Keys may be single- or double-quoted: the dictionary uses double quotes when
@@ -52,7 +52,7 @@ const used = new Set();
 
 for (const file of walk(srcRoot, [])) {
 	if (file.includes(path.join('src', 'i18n'))) continue;
-	const text = fs.readFileSync(file, 'utf8');
+	const text = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
 	let m;
 	while ((m = callRe.exec(text)) !== null) {
 		const key = unescape(m[2]);

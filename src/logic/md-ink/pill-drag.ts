@@ -60,7 +60,7 @@ const DRAG_THRESHOLD_PX = 3;
 /** Gap kept between the pill and the edge of its allowed area. */
 const EDGE_GAP_PX = 4;
 /** Controls that must never start a drag, whatever they are nested in. */
-const INTERACTIVE_SELECTOR = 'button, a, input, select, textarea, [contenteditable="true"]';
+const INTERACTIVE_SELECTOR = 'button, a, input, select, textarea, [contenteditable="true"], .bimo-md-ink-popover';
 
 /**
  * Bumped when the meaning of the stored numbers changes.
@@ -186,8 +186,20 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 			: { left: stored.left, top: stored.top };
 	}
 
+	function isHostVisible(bounds: DOMRect): boolean {
+		return host.isConnected && bounds.width > 0 && bounds.height > 0;
+	}
+
+	function syncHostVisibility(bounds: DOMRect): boolean {
+		if (positioning !== 'fixed') return true;
+		const visible = isHostVisible(bounds);
+		pill.classList.toggle('is-host-hidden', !visible);
+		return visible;
+	}
+
 	function placeDefault(): void {
 		const bounds = host.getBoundingClientRect();
+		syncHostVisibility(bounds);
 		const target = clampPosition(defaultPosition({ host: bounds, pill: pillSize() }), bounds);
 		current = target;
 		writePosition(target);
@@ -196,6 +208,7 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 	function place(): void {
 		if (disposed) return;
 		const bounds = host.getBoundingClientRect();
+		syncHostVisibility(bounds);
 		const stored = readStored();
 		const target = stored
 			? clampPosition(desiredFromStore(stored, bounds), bounds)
@@ -349,19 +362,25 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 		reclamp(): void {
 			if (disposed) return;
 			const bounds = host.getBoundingClientRect();
+			if (!syncHostVisibility(bounds)) {
+				// Host is hidden (e.g. background tab); keep its current coordinates
+				// untouched so it does not collapse to (4px, 4px) on document.body.
+				return;
+			}
 
 			// A pill the user never moved has no meaningful position to keep:
 			// the first pass may have run before the editor had a box, which
 			// clamps it into the top-left corner. Recompute the default instead
 			// of preserving that accident.
-			if (!readStored()) {
+			const stored = readStored();
+			if (!stored) {
 				const target = clampPosition(defaultPosition({ host: bounds, pill: pillSize() }), bounds);
 				current = target;
 				writePosition(target);
 				return;
 			}
 
-			current = clampPosition(readPosition(), bounds);
+			current = clampPosition(desiredFromStore(stored, bounds), bounds);
 			writePosition(current);
 		},
 	};

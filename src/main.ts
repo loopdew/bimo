@@ -213,6 +213,14 @@ export default class InkPlugin extends Plugin {
 						void this.pdfInk?.moveInk?.(oldPath, file.path);
 					}
 				}));
+				this.registerEvent(this.app.vault.on('delete', (file) => {
+					if (!(file instanceof TFile)) return;
+					if (file.extension === 'md') {
+						void mdInkStorage.remove(file.path);
+					} else if (file.extension === 'pdf') {
+						void this.pdfInk?.removeInk?.(file.path);
+					}
+				}));
 
 				// Runtime state, not a guess: whatever the layers actually look
 				// like after layout settles is written to the vault, so a mount
@@ -494,7 +502,7 @@ function implementDrawingEmbedCommands(plugin: InkPlugin) {
 		id: 'create-drawing-section',
 		name: t('New drawing'),
 		icon: 'draw_default',
-		hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'd' }],
+		hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'g' }],
 		editorCallback: (editor: Editor) => insertNewDrawingFile(plugin, editor)
 	});
 	plugin.addCommand({

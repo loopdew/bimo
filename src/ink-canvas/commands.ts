@@ -151,3 +151,68 @@ export class EraseAllCommand implements InkCommand {
 		this.store.replaceAll(this.previousStrokes);
 	}
 }
+
+/** Add multiple cloned strokes in one undoable step (used by Duplicate). */
+export class DuplicateStrokesCommand implements InkCommand {
+	private store: StrokeStore;
+	private clonedStrokes: InkStroke[];
+
+	constructor(store: StrokeStore, clonedStrokes: InkStroke[]) {
+		this.store = store;
+		this.clonedStrokes = clonedStrokes.map((s) => ({
+			...s,
+			points: s.points.map((pt) => [...pt] as InkPoint),
+			style: { ...s.style },
+			offset: { ...s.offset },
+		}));
+	}
+
+	apply(): void {
+		this.store.addMany(this.clonedStrokes);
+	}
+
+	unapply(): void {
+		this.store.remove(this.clonedStrokes.map((s) => s.id));
+	}
+}
+
+/** Update style properties (e.g. colour, size) on selected strokes in one undoable step. */
+export class RestyleStrokesCommand implements InkCommand {
+	private store: StrokeStore;
+	private previousStrokes: InkStroke[];
+	private nextStrokes: InkStroke[];
+
+	constructor(store: StrokeStore, strokeIds: string[], stylePatch: Partial<InkStroke['style']>) {
+		this.store = store;
+		this.previousStrokes = [];
+		this.nextStrokes = [];
+		for (const id of strokeIds) {
+			const stroke = store.getById(id);
+			if (!stroke) continue;
+			this.previousStrokes.push({
+				...stroke,
+				points: stroke.points.map((pt) => [...pt] as InkPoint),
+				style: { ...stroke.style },
+				offset: { ...stroke.offset },
+			});
+			this.nextStrokes.push({
+				...stroke,
+				points: stroke.points.map((pt) => [...pt] as InkPoint),
+				style: { ...stroke.style, ...stylePatch },
+				offset: { ...stroke.offset },
+			});
+		}
+	}
+
+	apply(): void {
+		const map = new Map<string, InkStroke>();
+		for (const s of this.nextStrokes) map.set(s.id, s);
+		this.store.updateStrokes(map);
+	}
+
+	unapply(): void {
+		const map = new Map<string, InkStroke>();
+		for (const s of this.previousStrokes) map.set(s.id, s);
+		this.store.updateStrokes(map);
+	}
+}

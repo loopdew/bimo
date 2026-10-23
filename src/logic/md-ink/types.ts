@@ -242,14 +242,105 @@ export function snapToRectangle(points: InkPoint[], tolerance: number): InkPoint
 }
 
 /**
+ * Straighten a closed loop into an ellipse (or circle when nearly equilateral).
+ *
+ * Circling a word on a note or a formula on a PDF is one of the most common
+ * annotation gestures. A loop counts as an ellipse when its ends meet, its
+ * bounding box is large enough not to be a handwritten letter ('o', 'e'), it
+ * winds roughly one full turn around its centre, and every point sits near the
+ * inscribed ellipse of its bounding box.
+ */
+export function snapToEllipse(points: InkPoint[], tolerance: number): InkPoint[] | null {
+	if (points.length < 8) return null;
+
+	const first = points[0];
+	const last = points[points.length - 1];
+	if (Math.hypot(last[0] - first[0], last[1] - first[1]) > tolerance * 3.5) {
+		return null;
+	}
+
+	let minX = Infinity;
+	let minY = Infinity;
+	let maxX = -Infinity;
+	let maxY = -Infinity;
+	for (const [x, y] of points) {
+		if (x < minX) minX = x;
+		if (y < minY) minY = y;
+		if (x > maxX) maxX = x;
+		if (y > maxY) maxY = y;
+	}
+
+	const width = maxX - minX;
+	const height = maxY - minY;
+	if (width < 28 || height < 20) return null;
+
+	const cx = (minX + maxX) / 2;
+	const cy = (minY + maxY) / 2;
+	let rx = width / 2;
+	let ry = height / 2;
+	const minRadius = Math.min(rx, ry);
+
+	let totalAngle = 0;
+	let prevAngle = Math.atan2(points[0][1] - cy, points[0][0] - cx);
+
+	for (let i = 0; i < points.length; i++) {
+		const [x, y] = points[i];
+		const norm = Math.hypot((x - cx) / rx, (y - cy) / ry);
+		const radialError = Math.abs(norm - 1) * minRadius;
+		if (radialError > tolerance * 1.5) return null;
+
+		if (i > 0) {
+			const angle = Math.atan2(y - cy, x - cx);
+			let delta = angle - prevAngle;
+			while (delta > Math.PI) delta -= Math.PI * 2;
+			while (delta < -Math.PI) delta += Math.PI * 2;
+			totalAngle += delta;
+			prevAngle = angle;
+		}
+	}
+
+	// Must wind roughly one full revolution (at least ~270° and at most ~470°).
+	const absSweep = Math.abs(totalAngle);
+	if (absSweep < Math.PI * 1.5 || absSweep > Math.PI * 2.65) return null;
+
+	// Snap nearly-equal axes to a true circle.
+	if (Math.abs(rx - ry) / Math.max(rx, ry) < 0.12) {
+		const r = (rx + ry) / 2;
+		rx = r;
+		ry = r;
+	}
+
+	const startAngle = Math.atan2(first[1] - cy, first[0] - cx);
+	const sign = totalAngle >= 0 ? 1 : -1;
+	const steps = 36;
+	const pressure = first[2];
+	const snapped: InkPoint[] = [];
+	for (let i = 0; i <= steps; i++) {
+		const theta = startAngle + sign * ((i / steps) * Math.PI * 2);
+		snapped.push([
+			cx + Math.cos(theta) * rx,
+			cy + Math.sin(theta) * ry,
+			pressure,
+		]);
+	}
+	return snapped;
+}
+
+/** Dwell time (ms) before an in-progress stroke snaps to a geometric shape while the pen tip is held still. */
+export const HOLD_TO_SNAP_DELAY_MS = 420;
+/** Tolerance (px) used when the user deliberately pauses the pen tip to trigger hold-to-snap. */
+export const HOLD_TO_SNAP_TOLERANCE = 14;
+
+/**
  * Apply whatever snap fits, in order of specificity.
  *
- * Rectangle first: a closed box is also made of four straight-ish runs, so the
- * line test would otherwise win and turn a frame into a single diagonal.
+ * Rectangle and ellipse first: a closed loop is also made of straight-ish runs,
+ * so the line test would otherwise win and turn a frame into a single diagonal.
  */
 export function snapStrokePoints(points: InkPoint[], tolerance: number): InkPoint[] {
 	if (points.length < 3) return points;
 	return snapToRectangle(points, tolerance)
+		?? snapToEllipse(points, tolerance)
 		?? snapToStraightLine(points, tolerance)
 		?? points;
 }

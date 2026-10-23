@@ -157,4 +157,47 @@ describe('pdf ink mounting', () => {
 		overlay.destroy();
 		expect(container.querySelectorAll('.bimo-pdf-ink-svg')).toHaveLength(0);
 	});
+
+	it('uses the highlighter preset when the highlighter tool is selected', () => {
+		const { container, overlay } = mount((root) => {
+			const page = document.createElement('div');
+			page.dataset.pageNumber = '1';
+			page.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600 } as DOMRect);
+			root.appendChild(page);
+		});
+
+		overlay.setOptions({ tool: 'highlighter' });
+		const svg = container.querySelector<SVGSVGElement>('.bimo-pdf-ink-svg')!;
+		svg.getBoundingClientRect = () => ({ left: 0, top: 0, right: 400, bottom: 600, width: 400, height: 600 } as DOMRect);
+
+		const down = new Event('pointerdown', { bubbles: true, cancelable: true });
+		Object.assign(down, { clientX: 50, clientY: 50, button: 0, pointerId: 1, pointerType: 'pen', pressure: 0.5 });
+		svg.dispatchEvent(down);
+
+		const up = new Event('pointerup', { bubbles: true, cancelable: true });
+		Object.assign(up, { clientX: 50, clientY: 50, button: 0, pointerId: 1, pointerType: 'pen', pressure: 0.5 });
+		svg.dispatchEvent(up);
+
+		const strokes = overlay.getDocument().strokes;
+		expect(strokes).toHaveLength(1);
+		expect(strokes[0].style.brush).toBe('highlighter');
+		expect(strokes[0].style.opacity).toBeCloseTo(0.32);
+		expect(strokes[0].style.color).toBe('#ffd400');
+
+		// Verify undo and redo on PDF overlay
+		expect(overlay.canUndo()).toBe(true);
+		expect(overlay.undo()).toBe(true);
+		expect(overlay.getDocument().strokes).toHaveLength(0);
+		expect(overlay.canRedo()).toBe(true);
+		expect(overlay.redo()).toBe(true);
+		expect(overlay.getDocument().strokes).toHaveLength(1);
+
+		// Verify Ctrl/Mod temporary eraser while in highlighter tool
+		const eraseDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+		Object.assign(eraseDown, { clientX: 50, clientY: 50, button: 0, pointerId: 2, pointerType: 'pen', ctrlKey: true });
+		svg.dispatchEvent(eraseDown);
+		expect(overlay.getDocument().strokes).toHaveLength(0);
+
+		overlay.destroy();
+	});
 });

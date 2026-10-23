@@ -1,7 +1,14 @@
 import { Notice } from 'obsidian';
 import type InkPlugin from 'src/main';
 import { t } from 'src/i18n';
-import { INK_BRUSH_SIZE_STEPS, INK_BRUSH_SWATCHES } from 'src/ink-canvas/brush-presets';
+import { INK_BRUSH_SIZE_STEPS, INK_BRUSH_SWATCHES, resolveBrushPreset } from 'src/ink-canvas/brush-presets';
+import {
+	isCustomTranscriptionProviderUsable,
+	normalizeCustomTranscriptionProvider,
+	prepareProviderMedia,
+	requestCustomTranscription,
+} from 'src/logic/transcription-providers';
+import { buildMagicDiaryNoteContent } from 'src/logic/ai/magic-diary';
 import type { MdInkPaper, MdInkTool } from './types';
 
 ///////////////////////////
@@ -21,6 +28,13 @@ const TOOL_LABELS: Record<MdInkTool, string> = {
 	eraser: 'Eraser',
 	lasso: 'Lasso',
 	pan: 'Pan',
+};
+
+const PAPER_LABELS: Record<MdInkPaper, string> = {
+	none: 'None',
+	ruled: 'Ruled',
+	grid: 'Grid',
+	dots: 'Dots',
 };
 
 const PAPER_ORDER: MdInkPaper[] = ['none', 'ruled', 'grid', 'dots'];
@@ -70,8 +84,11 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 		hotkeys: [{ modifiers: ['Mod', 'Alt'], key: 'z' }],
 		callback: () => {
 			const overlay = controller.active();
-			if (!overlay?.canUndo()) return;
-			overlay.undo();
+			if (overlay?.canUndo()) {
+				overlay.undo();
+				return;
+			}
+			plugin.pdfInk?.undoActive();
 		},
 	});
 
@@ -82,8 +99,11 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 		hotkeys: [{ modifiers: ['Mod', 'Alt', 'Shift'], key: 'z' }],
 		callback: () => {
 			const overlay = controller.active();
-			if (!overlay?.canRedo()) return;
-			overlay.redo();
+			if (overlay?.canRedo()) {
+				overlay.redo();
+				return;
+			}
+			plugin.pdfInk?.redoActive();
 		},
 	});
 
@@ -93,6 +113,45 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 		icon: 'trash',
 		callback: () => {
 			controller.active()?.deleteSelected();
+		},
+	});
+
+	plugin.addCommand({
+		id: 'md-ink-duplicate-selection',
+		name: t('Duplicate selected ink'),
+		icon: 'copy-plus',
+		callback: () => {
+			const overlay = controller.active();
+			if (!overlay?.duplicateSelected()) {
+				new Notice(t('Select ink with the lasso first.'));
+			}
+		},
+	});
+
+	plugin.addCommand({
+		id: 'md-ink-toggle-magic-page',
+		name: t('Toggle Magic Diary Page (you write a line, AI writes a line)'),
+		icon: 'sparkles',
+		callback: () => {
+			const overlay = requireOverlay();
+			if (!overlay) return;
+			overlay.setMagicDiaryMode(!overlay.isMagicDiaryMode());
+		},
+	});
+
+	plugin.addCommand({
+		id: 'md-ink-create-magic-page',
+		name: t('Create new Magic Diary Page'),
+		icon: 'wand-2',
+		callback: async () => {
+			const timestamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '-');
+			const fileName = `魔法书页 ${timestamp}.md`;
+			const content = buildMagicDiaryNoteContent();
+			const file = await plugin.app.vault.create(fileName, content);
+			const leaf = plugin.app.workspace.getLeaf(false);
+			await leaf.openFile(file);
+			controller.setTool('pen');
+			new Notice(t('✦ Magic Diary Page created — write a line with your pen and pause!'));
 		},
 	});
 
@@ -125,7 +184,7 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 			const current = overlay.getDocument().paper;
 			const next = PAPER_ORDER[(PAPER_ORDER.indexOf(current) + 1) % PAPER_ORDER.length];
 			overlay.setPaper(next);
-			new Notice(t('Paper: {paper}').replace('{paper}', next));
+			new Notice(t('Paper: {paper}').replace('{paper}', t(PAPER_LABELS[next])));
 		},
 	});
 
@@ -212,6 +271,38 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 			if (!(await adapter.exists(folder))) await adapter.mkdir(folder);
 			await adapter.write(path, overlay.buildSvg());
 			new Notice(t('笔墨 exported to {path}').replace('{path}', path));
+		},
+	});
+
+	plugin.addCommand({
+		id: 'md-ink-transcribe',
+		name: t('Transcribe ink on this note'),
+		icon: 'sparkles',
+		callback: async () => {
+			const overlay = controller.active();
+			if (!overlay?.hasInk()) {
+				new Notice(t('This note has no ink.'));
+				return;
+			}
+			const provider = normalizeCustomTranscriptionProvider(plugin.settings.customTranscriptionProvider);
+			if (!isCustomTranscriptionProviderUsable(provider)) {
+				new Notice(t('Enable a custom API in settings first.'));
+				return;
+			}
+			try {
+				const svg = overlay.buildSvg({ background: '#ffffff', defaultInkColour: '#111111' });
+				const media = await prepareProviderMedia(svg, provider.mediaFormat);
+				const transcript = (await requestCustomTranscription({ settings: provider, media })).trim();
+				if (!transcript) {
+					new Notice(t('Nothing to transcribe'));
+					return;
+				}
+				await navigator.clipboard?.writeText(transcript);
+				new Notice(t('Transcript copied to clipboard'));
+			} catch (error) {
+				console.warn('[bimo] md-ink transcription failed', error);
+				new Notice(t('Could not reach the endpoint. Check the settings and the key.'));
+			}
 		},
 	});
 
@@ -319,7 +410,8 @@ export function implementMdInkCommands(plugin: InkPlugin): void {
 			// global preference, and a second pane silently keeping the old one is
 			// the kind of inconsistency that reads as a bug later.
 			controller.refreshOptions({ brush: plugin.settings.mdInkBrush });
-			new Notice(t('Brush: {brush}').replace('{brush}', plugin.settings.mdInkBrush));
+			const preset = resolveBrushPreset(plugin.settings.mdInkBrush);
+			new Notice(t('Brush: {brush}').replace('{brush}', t(preset.label)));
 		},
 	});
 }

@@ -71,4 +71,15 @@ describe('pdf ink document storage', () => {
 		expect(doc.strokes).toEqual([]);
 		expect(doc.pdfPath).toBe('lecture.pdf');
 	});
+
+	it('returns an empty document when stored pdfPath mismatches (hash collision guard)', () => {
+		const raw = JSON.stringify({
+			version: 1,
+			pdfPath: 'other.pdf',
+			strokes: [{ id: 'a', page: 1, points: [[0.1, 0.2, 0.5]], style: { size: 0.01 } }],
+		});
+		const doc = parsePdfInkDocument(raw, 'lecture.pdf');
+		expect(doc.strokes).toHaveLength(0);
+		expect(doc.pdfPath).toBe('lecture.pdf');
+	});
 });

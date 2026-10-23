@@ -182,6 +182,10 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	transition: none;
 }
 
+.bimo-md-ink-pill.is-host-hidden {
+	display: none !important;
+}
+
 /* The pill lives on `document.body`, so `.cm-editor:hover` can no longer reach
    it — its own hover state is what brightens it now. */
 .bimo-md-ink-pill:hover,
@@ -217,6 +221,13 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 .bimo-md-ink-pill button.is-active {
 	background: var(--interactive-accent);
 	color: var(--text-on-accent);
+}
+
+.bimo-md-ink-pill button.is-disabled,
+.bimo-md-ink-pill button:disabled {
+	opacity: 0.35;
+	cursor: default;
+	pointer-events: none;
 }
 
 /*
@@ -279,6 +290,119 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	background: var(--background-modifier-border);
 }
 
+/* ── Floating style popover ──────────────────────────────────── */
+
+.bimo-md-ink-popover {
+	position: absolute;
+	top: calc(100% + 6px);
+	right: 0;
+	z-index: 45;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 210px;
+	max-width: min(260px, calc(100vw - 24px));
+	padding: 10px 12px;
+	border-radius: 10px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	cursor: default;
+	user-select: none;
+}
+
+.bimo-md-ink-popover.is-align-left {
+	right: auto;
+	left: 0;
+}
+
+.bimo-md-ink-popover.is-align-up {
+	top: auto;
+	bottom: calc(100% + 6px);
+}
+
+.bimo-md-ink-popover__section {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.bimo-md-ink-popover__label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	font-weight: 500;
+}
+
+.bimo-md-ink-popover__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__chip {
+	width: auto;
+	height: auto;
+	min-width: 0;
+	padding: 3px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-normal);
+	font-size: var(--font-ui-smaller);
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__chip.is-active {
+	background: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.bimo-md-ink-popover__swatches {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__swatch {
+	width: 1.45em;
+	height: 1.45em;
+	min-width: 1.45em;
+	padding: 0;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__swatch.is-active {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.bimo-md-ink-popover__sizes {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__size {
+	width: 2em;
+	height: 2em;
+	min-width: 2em;
+	border-radius: 6px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.bimo-md-ink-pill .bimo-md-ink-popover__size.is-active {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+
+.bimo-md-ink-popover__size-dot {
+	display: block;
+	border-radius: 50%;
+	background: var(--text-normal);
+}
+
 /* ── PDF pages ───────────────────────────────────────────────── */
 
 /*
@@ -305,6 +429,276 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 
 .bimo-pdf-ink-svg[data-tool='eraser'] {
 	cursor: cell;
+}
+
+.bimo-pdf-ink-svg[data-tool='lasso'] {
+	cursor: default;
+}
+
+.bimo-pdf-ink-svg path.is-selected {
+	filter: drop-shadow(0 0 2px var(--interactive-accent))
+		drop-shadow(0 0 4px var(--interactive-accent));
+}
+
+/* ── Floating Selection Action Bar ───────────────────────────── */
+
+.bimo-md-ink-selection-bar {
+	position: absolute;
+	z-index: 38;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 4px 7px;
+	border-radius: 999px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+	pointer-events: auto;
+	user-select: none;
+}
+
+.bimo-md-ink-selection-bar__swatch {
+	width: 1.25em;
+	height: 1.25em;
+	min-width: 1.25em;
+	padding: 0;
+	border-radius: 50%;
+	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	transition: transform 100ms ease;
+}
+
+.bimo-md-ink-selection-bar__swatch:hover {
+	transform: scale(1.15);
+}
+
+.bimo-md-ink-selection-bar__btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.85em;
+	height: 1.85em;
+	min-width: 1.85em;
+	padding: 0;
+	border: none;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.bimo-md-ink-selection-bar__btn:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.bimo-md-ink-selection-bar__btn[data-selection-action='delete']:hover {
+	color: var(--text-error);
+}
+
+/* ── Magic Diary Page ("魔法书页 · 你写一句，AI写一句") ────────── */
+
+.bimo-md-ink-pill button.bimo-md-ink-pill__magic-btn.is-active {
+	background: linear-gradient(135deg, #c6922c, #8e5b12);
+	color: #fff8e7;
+	box-shadow: 0 0 8px rgba(198, 146, 44, 0.55);
+}
+
+.bimo-magic-diary-active,
+.bimo-magic-diary-note .cm-scroller {
+	background: radial-gradient(
+			ellipse at center,
+			rgba(248, 236, 206, 0.36) 0%,
+			rgba(218, 192, 140, 0.18) 100%
+		),
+		var(--background-primary);
+	box-shadow: inset 0 0 42px rgba(168, 122, 42, 0.14);
+}
+
+.theme-dark .bimo-magic-diary-active,
+.theme-dark .bimo-magic-diary-note .cm-scroller {
+	background: radial-gradient(
+			ellipse at center,
+			rgba(58, 44, 24, 0.34) 0%,
+			rgba(24, 18, 10, 0.45) 100%
+		),
+		var(--background-primary);
+	box-shadow: inset 0 0 48px rgba(214, 164, 68, 0.12);
+}
+
+.bimo-md-ink-layer[data-magic-diary='true'] .bimo-md-ink-paper-line {
+	stroke: rgba(176, 132, 54, 0.32);
+}
+
+.bimo-md-ink-strokes path.is-magic-reading {
+	animation: bimo-magic-ink-shimmer 1.1s ease-in-out infinite;
+}
+
+@keyframes bimo-magic-ink-shimmer {
+	0%,
+	100% {
+		filter: drop-shadow(0 0 3px rgba(212, 160, 56, 0.65))
+			drop-shadow(0 0 7px rgba(212, 160, 56, 0.4));
+		opacity: 0.92;
+	}
+	50% {
+		filter: drop-shadow(0 0 6px rgba(245, 198, 84, 0.95))
+			drop-shadow(0 0 14px rgba(212, 160, 56, 0.75));
+		opacity: 0.55;
+	}
+}
+
+.bimo-magic-diary-banner {
+	position: sticky;
+	top: 8px;
+	left: 16px;
+	z-index: 36;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	max-width: calc(100% - 32px);
+	margin: 6px 16px;
+	padding: 5px 12px;
+	border-radius: 999px;
+	background: rgba(250, 240, 218, 0.92);
+	border: 1px solid rgba(184, 138, 56, 0.45);
+	box-shadow: 0 2px 10px rgba(120, 82, 20, 0.12);
+	color: #5c3d14;
+	font-size: var(--font-ui-smaller);
+	pointer-events: auto;
+	backdrop-filter: blur(6px);
+}
+
+.theme-dark .bimo-magic-diary-banner {
+	background: rgba(42, 32, 18, 0.92);
+	border-color: rgba(212, 160, 56, 0.42);
+	color: #ebd29b;
+}
+
+.bimo-magic-diary-banner__crest {
+	color: #c6922c;
+	font-size: 1.05em;
+}
+
+.bimo-magic-diary-banner__status {
+	font-style: italic;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.bimo-magic-diary-banner__btn {
+	padding: 2px 8px;
+	border-radius: 999px;
+	border: 1px solid rgba(184, 138, 56, 0.45);
+	background: rgba(198, 146, 44, 0.12);
+	color: inherit;
+	font-size: var(--font-ui-smaller);
+	cursor: pointer;
+}
+
+.bimo-magic-diary-banner__btn:hover {
+	background: rgba(198, 146, 44, 0.25);
+}
+
+.bimo-magic-diary-replies {
+	position: absolute;
+	inset: 0;
+	pointer-events: none;
+}
+
+.bimo-magic-diary-reply {
+	position: absolute;
+	z-index: 34;
+	max-width: min(440px, calc(100% - 48px));
+	padding: 10px 14px;
+	border-radius: 10px;
+	background: rgba(252, 244, 225, 0.9);
+	border-left: 3px solid #b8862d;
+	box-shadow: 0 4px 16px rgba(92, 61, 20, 0.12);
+	color: #4a2e0b;
+	font-family: 'STKaiti', 'KaiTi', 'Baskerville', 'Georgia', serif;
+	line-height: 1.55;
+	pointer-events: auto;
+	animation: bimo-magic-reply-appear 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.theme-dark .bimo-magic-diary-reply {
+	background: rgba(38, 29, 17, 0.9);
+	border-left-color: #d4a038;
+	color: #f0dbb0;
+	box-shadow: 0 4px 18px rgba(0, 0, 0, 0.38);
+}
+
+@keyframes bimo-magic-reply-appear {
+	from {
+		opacity: 0;
+		transform: translateY(6px) scale(0.98);
+		filter: blur(2px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0) scale(1);
+		filter: blur(0);
+	}
+}
+
+.bimo-magic-diary-reply__heard {
+	font-size: 0.82em;
+	opacity: 0.68;
+	margin-bottom: 4px;
+}
+
+.bimo-magic-diary-reply__body {
+	font-size: 1.04em;
+	letter-spacing: 0.02em;
+	white-space: pre-wrap;
+}
+
+.bimo-magic-diary-reply__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 6px;
+	opacity: 0.72;
+}
+
+.bimo-magic-diary-reply__action {
+	padding: 1px 7px;
+	border-radius: 6px;
+	border: 1px solid rgba(184, 138, 56, 0.35);
+	background: transparent;
+	color: inherit;
+	font-size: 0.76em;
+	cursor: pointer;
+}
+
+.bimo-magic-diary-reply__action:hover {
+	background: rgba(198, 146, 44, 0.18);
+}
+
+/* ── Coarse pointer (Android phone & tablet ergonomics) ─────── */
+
+@media (pointer: coarse) {
+	.bimo-md-ink-pill {
+		padding: 4px 7px;
+		gap: 4px;
+	}
+	.bimo-md-ink-pill button {
+		width: 2.25em;
+		height: 2.25em;
+		min-width: 2.25em;
+	}
+	.bimo-md-ink-selection-bar__btn {
+		width: 2.2em;
+		height: 2.2em;
+		min-width: 2.2em;
+	}
+	.bimo-md-ink-selection-bar__swatch {
+		width: 1.55em;
+		height: 1.55em;
+		min-width: 1.55em;
+	}
 }
 
 /* ── Settings swatches ───────────────────────────────────────── */

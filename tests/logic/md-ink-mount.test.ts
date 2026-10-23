@@ -3,6 +3,7 @@ import { EditorView, type ViewUpdate } from '@codemirror/view';
 import { StateEffect } from '@codemirror/state';
 import { DEFAULT_SETTINGS } from 'src/types/plugin-settings';
 import { createMdInkExtension, resolveNotePath } from 'src/logic/md-ink/md-ink-extension';
+import { MdInkOverlay } from 'src/logic/md-ink/md-ink-overlay';
 
 //////////
 //////////
@@ -227,6 +228,133 @@ describe('note ink mounting', () => {
 		view.destroy();
 		expect(document.querySelector('.bimo-md-ink-layer')).toBeNull();
 		expect(document.querySelector('.bimo-md-ink-pill')).toBeNull();
+	});
+
+	it('uses highlighter preset, supports lasso select/move/deselect, cross-line copy/paste, tail eraser, and reuses SVG path nodes', () => {
+		if (!document.elementFromPoint) {
+			document.elementFromPoint = () => null;
+		}
+		const view = new EditorView({
+			state: EditorState.create({ doc: 'line one\nline two\nline three\nline four' }),
+			parent: document.body,
+		});
+		const overlay = new MdInkOverlay(view, 'Notes/Test.md', {
+			brush: 'pen',
+			size: 4,
+			colour: 'currentColor',
+			mouseDrawing: true,
+			fingerDraws: false,
+			paper: 'none',
+			eraserRadius: 14,
+			shapeSnap: false,
+		});
+
+		const layer = document.querySelector<HTMLElement>('.bimo-md-ink-layer')!;
+
+		const fire = (target: EventTarget, type: string, x: number, y: number, extra: Record<string, unknown> = {}) => {
+			const ev = new Event(type, { bubbles: true, cancelable: true });
+			Object.assign(ev, { clientX: x, clientY: y, button: 0, pointerId: 1, pointerType: 'pen', pressure: 0.5, ...extra });
+			target.dispatchEvent(ev);
+		};
+
+		// 1. Highlighter tool uses highlighter preset even when options.brush is 'pen'
+		overlay.setTool('highlighter');
+		fire(layer, 'pointerdown', 20, 10);
+		fire(window, 'pointermove', 60, 10);
+		fire(window, 'pointerup', 60, 10);
+
+		expect(overlay.getDocument().strokes).toHaveLength(1);
+		expect(overlay.getDocument().strokes[0].style.brush).toBe('highlighter');
+		expect(overlay.getDocument().strokes[0].style.opacity).toBeCloseTo(0.32);
+		expect(overlay.getDocument().strokes[0].style.color).toBe('#ffd400');
+
+		// 2. DOM <path> reuse across renders
+		overlay.render();
+		const firstPathNode = document.querySelector('.bimo-md-ink-strokes path');
+		expect(firstPathNode).not.toBeNull();
+		overlay.render();
+		const secondPathNode = document.querySelector('.bimo-md-ink-strokes path');
+		expect(secondPathNode).toBe(firstPathNode);
+
+		// 3. Lasso box selection, move drag, and click-to-deselect
+		overlay.setTool('lasso');
+		// Box-select around (20..60, 10)
+		fire(layer, 'pointerdown', 10, 0);
+		fire(window, 'pointermove', 70, 25);
+		fire(window, 'pointerup', 70, 25);
+		expect(firstPathNode?.classList.contains('is-selected')).toBe(true);
+
+		// Drag inside selection bounds moves the stroke without showing lassoRect
+		fire(layer, 'pointerdown', 30, 10);
+		fire(window, 'pointermove', 50, 20);
+		fire(window, 'pointerup', 50, 20);
+		expect(overlay.getDocument().strokes[0].offset).toEqual({ x: 20, y: 10 });
+
+		// Click outside selection clears selection instead of staying locked
+		fire(layer, 'pointerdown', 200, 200);
+		fire(window, 'pointerup', 200, 200);
+		expect(firstPathNode?.classList.contains('is-selected')).toBe(false);
+
+		// 4. Cross-line copy/paste preserves lineDelta
+		overlay.clearAll();
+		overlay.replaceDocument({
+			version: 1,
+			notePath: 'Notes/Test.md',
+			paper: 'none',
+			updatedAt: 0,
+			strokes: [
+				{
+					id: 's1',
+					points: [[10, 5, 0.5], [20, 5, 0.5]],
+					style: { size: 4, thinning: 0.5, smoothing: 0.5, streamline: 0.5, simulatePressure: true, color: 'currentColor' },
+					anchor: { line: 1, lineText: 'line one' },
+					offset: { x: 0, y: 0 },
+					createdAt: 0,
+				},
+				{
+					id: 's2',
+					points: [[10, 5, 0.5], [20, 5, 0.5]],
+					style: { size: 4, thinning: 0.5, smoothing: 0.5, streamline: 0.5, simulatePressure: true, color: 'currentColor' },
+					anchor: { line: 3, lineText: 'line three' },
+					offset: { x: 0, y: 0 },
+					createdAt: 0,
+				},
+			],
+		});
+		overlay.setTool('lasso');
+		fire(layer, 'pointerdown', 0, 0);
+		fire(window, 'pointermove', 100, 100);
+		fire(window, 'pointerup', 100, 100);
+
+		const copied = overlay.copySelected();
+		expect(copied).not.toBeNull();
+		// Move cursor to line 2 ('line two') and paste
+		const line2From = view.state.doc.line(2).from;
+		view.dispatch({ selection: { anchor: line2From } });
+		overlay.clearAll();
+		expect(overlay.paste(copied!)).toBe(true);
+		expect(overlay.getDocument().strokes).toHaveLength(2);
+		expect(overlay.getDocument().strokes[0].anchor.line).toBe(2);
+		expect(overlay.getDocument().strokes[1].anchor.line).toBe(4);
+
+		// 5. Stylus tail eraser (button === 5) erases even while pen tool is active
+		overlay.setTool('pen');
+		fire(layer, 'pointerdown', 10, 5, { button: 5 });
+		fire(window, 'pointermove', 10, 25, { button: 5 });
+		fire(window, 'pointerup', 10, 25, { button: 5 });
+		expect(overlay.getDocument().strokes.length).toBeLessThan(2);
+
+		// 6. Floating pill style popover opens and updates paper/colour
+		const styleBtn = document.querySelector<HTMLButtonElement>('[data-md-ink-action="style"]')!;
+		expect(styleBtn).not.toBeNull();
+		styleBtn.click();
+		const gridChip = document.querySelector<HTMLButtonElement>('[data-md-ink-paper="grid"]')!;
+		expect(gridChip).not.toBeNull();
+		gridChip.click();
+		expect(overlay.getDocument().paper).toBe('grid');
+
+		overlay.destroy();
+		view.destroy();
 	});
 });
 

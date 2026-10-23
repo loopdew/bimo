@@ -3,16 +3,34 @@ import { Notice, setIcon } from 'obsidian';
 import { t } from 'src/i18n';
 import type { EditorView } from '@codemirror/view';
 import type { InkBrushKind } from 'src/ink-canvas/brush-presets';
-import { resolveBrushPreset } from 'src/ink-canvas/brush-presets';
+import { INK_BRUSH_SWATCHES, resolveBrushPreset } from 'src/ink-canvas/brush-presets';
 import { getRenderedStrokeData } from 'src/ink-canvas/rendered-stroke-cache';
 import type { InkPoint, InkStrokeStyle } from 'src/ink-canvas/types';
 import { toStrokeOptions } from 'src/ink-canvas/types';
+import { getPointerSamples } from 'src/ink-canvas/utils/pointer-samples';
 import { getSvgPathFromStroke } from 'src/ink-canvas/utils/svg-path-from-stroke';
+import {
+	hasMagicDiaryFrontmatter,
+	MAGIC_DIARY_PAUSE_MS,
+	requestMagicDiaryTurn,
+} from 'src/logic/ai/magic-diary';
+import {
+	isCustomTranscriptionProviderUsable,
+	normalizeCustomTranscriptionProvider,
+	prepareProviderMedia,
+	requestCustomTranscription,
+	type ChatTurn,
+	type CustomTranscriptionProviderSettings,
+} from 'src/logic/transcription-providers';
 import { attachPillDrag, type PillDragHandle } from './pill-drag';
+import { createPillStylePopover, type PillStylePatch, type PillStylePopoverHandle } from './pill-style-popover';
+import { attachTouchTapUndo } from './touch-tap-undo';
 import {
 	createEmptyMdInkDocument,
 	dotPath,
 	fingerprintLine,
+	HOLD_TO_SNAP_DELAY_MS,
+	HOLD_TO_SNAP_TOLERANCE,
 	mergeMdInkDocuments,
 	resolveAnchorLine,
 	resolvePaperStyle,
@@ -83,24 +101,35 @@ export interface MdInkOverlayOptions {
 	onChange?: (doc: MdInkDocument) => void;
 	/** A tool was picked from the floating pill; hosts propagate it to other notes. */
 	onToolSelected?: (tool: MdInkTool) => void;
+	/** Brush, colour, size, or paper was picked from the floating pill's style popover. */
+	onStyleChange?: (patch: PillStylePatch) => void;
+	/** Accessor for custom AI provider settings (used by Magic Diary Page & selection transcription). */
+	getAiSettings?: () => CustomTranscriptionProviderSettings | undefined;
 }
 
 type UndoEntry =
 	| { type: 'add'; stroke: MdInkStroke }
 	| { type: 'addMany'; strokes: MdInkStroke[] }
 	| { type: 'remove'; strokes: MdInkStroke[] }
-	| { type: 'move'; shifts: Array<{ id: string; from: { x: number; y: number }; to: { x: number; y: number } }> };
+	| { type: 'move'; shifts: Array<{ id: string; from: { x: number; y: number }; to: { x: number; y: number } }> }
+	| { type: 'restyle'; changes: Array<{ id: string; fromColor: string; toColor: string }> };
 
 interface ActiveStroke {
 	points: InkPoint[];
 	style: InkStrokeStyle;
 	anchorLine: number;
 	anchorText: string;
+	lastPressure: number;
+	hasRealPressure: boolean;
+	snappedByHold?: boolean;
 }
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const LAYER_CLASS = 'bimo-md-ink-layer';
 const MIN_POINT_DISTANCE = 1.1;
+/** Extra scrollable canvas height kept below the lowest stroke so blank notes grow as you write. */
+const BLANK_NOTE_GROW_BUFFER_PX = 360;
+const HOLD_SNAP_JITTER_PX = 3;
 /** Where the dragged pill position lives; one preference for every note. */
 const PILL_POSITION_KEY = 'bimo-md-ink-pill-position';
 
@@ -118,9 +147,25 @@ export class MdInkOverlay {
 	private layer!: HTMLDivElement;
 	private pill!: HTMLDivElement;
 	private pillDrag: PillDragHandle | null = null;
+	private stylePopover: PillStylePopoverHandle | null = null;
+	private undoBtn: HTMLButtonElement | null = null;
+	private redoBtn: HTMLButtonElement | null = null;
+	private magicBtn: HTMLButtonElement | null = null;
+	private selectionBar: HTMLDivElement | null = null;
+	private magicBannerEl: HTMLDivElement | null = null;
+	private magicStatusEl: HTMLSpanElement | null = null;
+	private magicRepliesContainer: HTMLDivElement | null = null;
+	private magicDiaryMode = false;
+	private magicAutoChecked = false;
+	private magicPendingStrokeIds = new Set<string>();
+	private magicReadingStrokeIds = new Set<string>();
+	private magicPauseTimer: ReturnType<typeof setTimeout> | null = null;
+	private magicHistory: ChatTurn[] = [];
+	private magicMaxReplyBottomY = 0;
 	private svg!: SVGSVGElement;
 	private paperGroup!: SVGGElement;
 	private strokeGroup!: SVGGElement;
+	private readonly pathElements = new Map<string, SVGPathElement>();
 	private livePath!: SVGPathElement;
 	private lassoRect!: SVGRectElement;
 	/** Ring under the pointer showing the actual nib or eraser footprint. */
@@ -132,14 +177,19 @@ export class MdInkOverlay {
 	private enabled = true;
 	/** Space held: transient pan regardless of the chosen tool. */
 	private spaceHeld = false;
+	/** Stylus tail eraser (button 5) or Mod-key temporary eraser during a stroke. */
+	private transientEraser = false;
 
 	private activeStroke: ActiveStroke | null = null;
 	private activePointerId: number | null = null;
+	private holdSnapTimer: ReturnType<typeof setTimeout> | null = null;
+	private holdAnchorScreen: { x: number; y: number } | null = null;
 
 	private undoStack: UndoEntry[] = [];
 	private redoStack: UndoEntry[] = [];
 
 	private selectedIds = new Set<string>();
+	private lassoMode: 'select' | 'move' | null = null;
 	private lassoStart: { x: number; y: number } | null = null;
 	private dragStart: { x: number; y: number } | null = null;
 	private dragOrigins = new Map<string, { x: number; y: number }>();
@@ -210,13 +260,172 @@ export class MdInkOverlay {
 
 		this.svg.append(this.paperGroup, this.strokeGroup, this.livePath, this.lassoRect, this.reticle);
 		this.layer.appendChild(this.svg);
+		this.createSelectionBar();
+		this.createMagicDiaryDom();
 		scroller.appendChild(this.layer);
 
 		this.createPill();
 		this.bindPointerEvents();
 		this.bindKeyboard();
+		const tapHandle = attachTouchTapUndo(scroller, {
+			onUndo: () => {
+				if (this.enabled && this.getTool() !== 'pan') this.undo();
+			},
+			onRedo: () => {
+				if (this.enabled && this.getTool() !== 'pan') this.redo();
+			},
+		});
+		this.disposers.push(() => tapHandle.destroy());
 		this.applyToolCursor();
+		this.checkMagicFrontmatter();
 		this.render();
+	}
+
+	private createSelectionBar(): void {
+		const bar = document.createElement('div');
+		bar.className = 'bimo-md-ink-selection-bar';
+		bar.style.display = 'none';
+		bar.addEventListener('pointerdown', (e) => e.stopPropagation());
+		bar.addEventListener('click', (e) => e.stopPropagation());
+
+		for (const swatch of INK_BRUSH_SWATCHES.slice(0, 5)) {
+			const dot = document.createElement('button');
+			dot.type = 'button';
+			dot.className = 'bimo-md-ink-selection-bar__swatch';
+			dot.dataset.selectionColour = swatch;
+			dot.title = swatch === 'currentColor' ? t('Theme ink') : swatch;
+			dot.style.background = swatch === 'currentColor' ? 'var(--text-normal)' : swatch;
+			dot.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				this.recolourSelected(swatch);
+			});
+			bar.appendChild(dot);
+		}
+
+		const divider = document.createElement('span');
+		divider.className = 'bimo-md-ink-pill__gap';
+		bar.appendChild(divider);
+
+		const actions: Array<{ action: string; icon: string; label: string; run: () => void }> = [
+			{
+				action: 'duplicate',
+				icon: 'copy-plus',
+				label: t('Duplicate'),
+				run: () => {
+					this.duplicateSelected();
+				},
+			},
+			{
+				action: 'copy',
+				icon: 'copy',
+				label: t('Copy selected ink'),
+				run: () => {
+					const payload = this.copySelected();
+					if (payload) {
+						void navigator.clipboard?.writeText(payload);
+						new Notice(t('笔墨 copied.'));
+					}
+				},
+			},
+			{
+				action: 'cut',
+				icon: 'scissors',
+				label: t('Cut selected ink'),
+				run: () => {
+					const payload = this.cutSelected();
+					if (payload) {
+						void navigator.clipboard?.writeText(payload);
+						new Notice(t('笔墨 cut.'));
+					}
+				},
+			},
+			{
+				action: 'transcribe',
+				icon: 'sparkles',
+				label: t('Transcribe selected ink'),
+				run: () => {
+					void this.transcribeSelected();
+				},
+			},
+			{
+				action: 'delete',
+				icon: 'trash-2',
+				label: t('Delete selected ink'),
+				run: () => {
+					this.deleteSelected();
+				},
+			},
+		];
+
+		for (const item of actions) {
+			const btn = document.createElement('button');
+			btn.type = 'button';
+			btn.className = 'bimo-md-ink-selection-bar__btn';
+			btn.dataset.selectionAction = item.action;
+			btn.title = item.label;
+			setIcon(btn, item.icon);
+			btn.addEventListener('click', (e) => {
+				e.preventDefault();
+				e.stopPropagation();
+				item.run();
+			});
+			bar.appendChild(btn);
+		}
+
+		this.selectionBar = bar;
+		this.layer.appendChild(bar);
+	}
+
+	private createMagicDiaryDom(): void {
+		const banner = document.createElement('div');
+		banner.className = 'bimo-magic-diary-banner';
+		banner.style.display = 'none';
+		banner.addEventListener('pointerdown', (e) => e.stopPropagation());
+		banner.addEventListener('click', (e) => e.stopPropagation());
+
+		const crest = document.createElement('span');
+		crest.className = 'bimo-magic-diary-banner__crest';
+		crest.textContent = '✦';
+
+		const status = document.createElement('span');
+		status.className = 'bimo-magic-diary-banner__status';
+		status.textContent = t('Magic Diary Page · Write a line and pause; the page will answer');
+		this.magicStatusEl = status;
+
+		const replyNowBtn = document.createElement('button');
+		replyNowBtn.type = 'button';
+		replyNowBtn.className = 'bimo-magic-diary-banner__btn';
+		replyNowBtn.dataset.magicAction = 'reply-now';
+		replyNowBtn.textContent = t('Reply now');
+		replyNowBtn.title = t('Ask the Magic Diary Page to respond immediately');
+		replyNowBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			void this.triggerMagicDiaryTurn(true);
+		});
+
+		const clearRepliesBtn = document.createElement('button');
+		clearRepliesBtn.type = 'button';
+		clearRepliesBtn.className = 'bimo-magic-diary-banner__btn';
+		clearRepliesBtn.dataset.magicAction = 'clear-replies';
+		clearRepliesBtn.textContent = t('Clear whispers');
+		clearRepliesBtn.title = t('Fade away all diary replies on this page');
+		clearRepliesBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.clearMagicReplies();
+		});
+
+		banner.append(crest, status, replyNowBtn, clearRepliesBtn);
+		this.magicBannerEl = banner;
+		this.layer.appendChild(banner);
+
+		const replies = document.createElement('div');
+		replies.className = 'bimo-magic-diary-replies';
+		replies.style.display = 'none';
+		this.magicRepliesContainer = replies;
+		this.layer.appendChild(replies);
 	}
 
 	/**
@@ -231,11 +440,11 @@ export class MdInkOverlay {
 		this.pill.className = 'bimo-md-ink-pill';
 
 		const toolButtons: Array<{ tool: MdInkTool; icon: string; label: string }> = [
-			{ tool: 'pen', icon: 'pencil', label: 'Pen' },
-			{ tool: 'highlighter', icon: 'highlighter', label: 'Highlighter' },
-			{ tool: 'eraser', icon: 'eraser', label: 'Eraser' },
-			{ tool: 'lasso', icon: 'lasso', label: 'Lasso' },
-			{ tool: 'pan', icon: 'hand', label: 'Pan' },
+			{ tool: 'pen', icon: 'pencil', label: t('Pen') },
+			{ tool: 'highlighter', icon: 'highlighter', label: t('Highlighter') },
+			{ tool: 'eraser', icon: 'eraser', label: t('Eraser') },
+			{ tool: 'lasso', icon: 'lasso', label: t('Lasso') },
+			{ tool: 'pan', icon: 'hand', label: t('Pan') },
 		];
 
 		for (const { tool, icon, label } of toolButtons) {
@@ -252,11 +461,60 @@ export class MdInkOverlay {
 			button.addEventListener('click', (event) => {
 				event.preventDefault();
 				event.stopPropagation();
+				this.stylePopover?.close();
 				this.options.onToolSelected?.(tool);
 				this.setTool(tool);
 			});
 			this.pill.appendChild(button);
 		}
+
+		this.stylePopover = createPillStylePopover({
+			pill: this.pill,
+			showPaper: true,
+			getState: () => ({
+				brush: this.options.brush,
+				colour: this.options.colour,
+				size: this.options.size,
+				paper: this.options.paper,
+				fingerDraws: this.options.fingerDraws,
+			}),
+			onChange: (patch) => {
+				if (patch.paper !== undefined) {
+					this.setPaper(patch.paper);
+				}
+				if (
+					patch.brush !== undefined
+					|| patch.colour !== undefined
+					|| patch.size !== undefined
+					|| patch.fingerDraws !== undefined
+				) {
+					this.setOptions(patch);
+				}
+				if (patch.brush !== undefined) {
+					const targetTool: MdInkTool = patch.brush === 'highlighter' ? 'highlighter' : 'pen';
+					this.options.onToolSelected?.(targetTool);
+					this.setTool(targetTool);
+				}
+				this.options.onStyleChange?.(patch);
+			},
+		});
+		this.pill.appendChild(this.stylePopover.button);
+
+		const magicBtn = document.createElement('button');
+		magicBtn.type = 'button';
+		magicBtn.className = 'bimo-md-ink-pill__magic-btn';
+		magicBtn.dataset.mdInkAction = 'magic-diary';
+		setIcon(magicBtn, 'sparkles');
+		magicBtn.title = t('Toggle Magic Diary Page (you write a line, AI writes a line)');
+		magicBtn.addEventListener('pointerdown', (event) => event.stopPropagation());
+		magicBtn.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.stylePopover?.close();
+			this.setMagicDiaryMode(!this.magicDiaryMode);
+		});
+		this.magicBtn = magicBtn;
+		this.pill.appendChild(magicBtn);
 
 		const gap = document.createElement('span');
 		gap.className = 'bimo-md-ink-pill__gap';
@@ -264,19 +522,38 @@ export class MdInkOverlay {
 
 		const undo = document.createElement('button');
 		undo.type = 'button';
+		undo.dataset.mdInkAction = 'undo';
 		setIcon(undo, 'undo-2');
-		undo.title = 'Undo stroke';
+		undo.title = t('Undo ink stroke');
+		undo.addEventListener('pointerdown', (event) => event.stopPropagation());
 		undo.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
 			this.undo();
 		});
+		this.undoBtn = undo;
 		this.pill.appendChild(undo);
+
+		const redo = document.createElement('button');
+		redo.type = 'button';
+		redo.dataset.mdInkAction = 'redo';
+		setIcon(redo, 'redo-2');
+		redo.title = t('Redo ink stroke');
+		redo.addEventListener('pointerdown', (event) => event.stopPropagation());
+		redo.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.redo();
+		});
+		this.redoBtn = redo;
+		this.pill.appendChild(redo);
 
 		const clear = document.createElement('button');
 		clear.type = 'button';
+		clear.dataset.mdInkAction = 'clear';
 		setIcon(clear, 'trash-2');
-		clear.title = 'Clear ink on this note';
+		clear.title = t('Clear all ink on this note');
+		clear.addEventListener('pointerdown', (event) => event.stopPropagation());
 		clear.addEventListener('click', (event) => {
 			event.preventDefault();
 			event.stopPropagation();
@@ -294,6 +571,8 @@ export class MdInkOverlay {
 		// the editor tree that cannot happen at all.
 		document.body.appendChild(this.pill);
 		this.disposers.push(() => {
+			this.stylePopover?.destroy();
+			this.stylePopover = null;
 			this.pillDrag?.destroy();
 			this.pillDrag = null;
 			this.pill.remove();
@@ -301,6 +580,7 @@ export class MdInkOverlay {
 		this.bindPillDrag();
 		this.syncPill();
 		this.syncPillColour();
+		this.syncUndoRedoButtons();
 	}
 
 	/**
@@ -351,21 +631,51 @@ export class MdInkOverlay {
 		for (const button of Array.from(this.pill.querySelectorAll<HTMLButtonElement>('[data-md-ink-tool]'))) {
 			button.classList.toggle('is-active', button.dataset.mdInkTool === active);
 		}
+		this.stylePopover?.sync();
+	}
+
+	private syncUndoRedoButtons(): void {
+		if (this.undoBtn) {
+			const canUndo = this.canUndo();
+			this.undoBtn.disabled = !canUndo;
+			this.undoBtn.classList.toggle('is-disabled', !canUndo);
+		}
+		if (this.redoBtn) {
+			const canRedo = this.canRedo();
+			this.redoBtn.disabled = !canRedo;
+			this.redoBtn.classList.toggle('is-disabled', !canRedo);
+		}
+	}
+
+	/** Reclamp the floating pill and sync its visibility with the editor host. */
+	reclampPill(): void {
+		this.pillDrag?.reclamp();
 	}
 
 	destroy(): void {
 		this.destroyed = true;
+		this.clearHoldSnapTimer();
+		this.clearMagicPauseTimer();
+		this.scrollerEl.classList.remove('bimo-magic-diary-active');
 		for (const dispose of this.disposers) dispose();
 		this.disposers.length = 0;
+		this.pathElements.clear();
 		this.layer.remove();
 	}
 
 	/** Re-read settings after the user changes one. */
 	setOptions(patch: Partial<MdInkOverlayOptions>): void {
+		const prevColour = this.options.colour;
 		this.options = { ...this.options, ...patch };
 		this.applyToolCursor();
-		if (patch.colour !== undefined) this.syncPillColour();
+		if (patch.colour !== undefined) {
+			this.syncPillColour();
+			if (patch.colour !== prevColour && this.selectedIds.size > 0) {
+				this.recolourSelected(patch.colour);
+			}
+		}
 		if (patch.paper !== undefined) this.render();
+		this.stylePopover?.sync();
 	}
 
 	getDocument(): MdInkDocument {
@@ -378,6 +688,8 @@ export class MdInkOverlay {
 		this.undoStack = [];
 		this.redoStack = [];
 		this.selectedIds.clear();
+		this.syncUndoRedoButtons();
+		this.stylePopover?.sync();
 		this.render();
 	}
 
@@ -424,6 +736,8 @@ export class MdInkOverlay {
 	setEnabled(enabled: boolean): void {
 		this.enabled = enabled;
 		if (this.layer) this.layer.style.display = enabled ? '' : 'none';
+		if (this.pill) this.pill.style.display = enabled ? '' : 'none';
+		if (!enabled) this.stylePopover?.close();
 		this.applyToolCursor();
 	}
 
@@ -466,7 +780,12 @@ export class MdInkOverlay {
 
 	/** Document line (1-based) under a screen point. */
 	private lineAtScreen(clientX: number, clientY: number): number {
-		const pos = this.view.posAtCoords({ x: clientX, y: clientY }, false);
+		let pos: number | null = null;
+		try {
+			pos = this.view.posAtCoords({ x: clientX, y: clientY }, false);
+		} catch {
+			pos = null;
+		}
 		const resolved = pos ?? this.view.state.selection.main.head;
 		return this.view.state.doc.lineAt(resolved).number;
 	}
@@ -476,7 +795,12 @@ export class MdInkOverlay {
 		const total = this.view.state.doc.lines;
 		if (lineNumber < 1 || lineNumber > total) return null;
 		const lineFrom = this.view.state.doc.line(lineNumber).from;
-		const coords = this.view.coordsAtPos(lineFrom);
+		let coords: { top: number } | null = null;
+		try {
+			coords = this.view.coordsAtPos(lineFrom);
+		} catch {
+			coords = null;
+		}
 		const origin = this.contentOrigin();
 		if (coords) return coords.top - origin.y;
 
@@ -519,6 +843,18 @@ export class MdInkOverlay {
 	///////////////////////////
 	// Style
 	///////////////////////////
+
+	/**
+	 * Resolve the brush preset for the active tool.
+	 *
+	 * Picking the `highlighter` tool on the pill must always draw with the
+	 * highlighter preset; picking `pen` uses the configured pen brush (falling
+	 * back to `pen` if `options.brush` was left on `highlighter`).
+	 */
+	private effectiveBrush(): InkBrushKind {
+		if (this.getTool() === 'highlighter') return 'highlighter';
+		return this.options.brush === 'highlighter' ? 'pen' : this.options.brush;
+	}
 
 	private buildStyle(brush: InkBrushKind): InkStrokeStyle {
 		const preset = resolveBrushPreset(brush);
@@ -571,16 +907,75 @@ export class MdInkOverlay {
 		if (!this.destroyed && this.layer.parentElement !== scroller) {
 			scroller.appendChild(this.layer);
 		}
-		this.renderPaper();
+		this.checkMagicFrontmatter();
 		this.renderStrokes();
 		this.syncLayerSize();
+		this.renderPaper();
+		this.syncSelectionBar();
+	}
+
+	/** Lowest y-coordinate (in content space) reached by any committed or in-progress stroke. */
+	private maxStrokeBottomY(): number {
+		let maxY = this.magicDiaryMode ? this.magicMaxReplyBottomY : 0;
+		const lineTops = new Map<number, number>();
+		for (const stroke of this.doc.strokes) {
+			const line = this.lineOf(stroke);
+			const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
+			let top = lineTops.get(lineNumber);
+			if (top === undefined) {
+				top = this.lineTopInContent(lineNumber) ?? 0;
+				lineTops.set(lineNumber, top);
+			}
+			for (const [, py] of stroke.points) {
+				const y = top + stroke.offset.y + py;
+				if (y > maxY) maxY = y;
+			}
+		}
+		if (this.activeStroke) {
+			const top = this.lineTopInContent(this.activeStroke.anchorLine) ?? 0;
+			for (const [, py] of this.activeStroke.points) {
+				const y = top + py;
+				if (y > maxY) maxY = y;
+			}
+		}
+		return maxY;
+	}
+
+	/**
+	 * Compute the drawable canvas dimensions.
+	 *
+	 * On a blank or short note, `.cm-content.scrollHeight` is only one line tall
+	 * (~28-40px). Sizing the ink layer strictly to `content.scrollHeight` made the
+	 * rest of a blank page unclickable and stopped paper lines after line 1.
+	 * Including `scroller.clientHeight` and `maxStrokeBottomY() + BLANK_NOTE_GROW_BUFFER_PX`
+	 * turns any blank `.md` file into an auto-expanding sheet of paper.
+	 */
+	private computeCanvasDimensions(): { width: number; height: number } {
+		const content = this.view.contentDOM;
+		const scroller = this.scrollerEl;
+		const width = Math.max(content.scrollWidth, content.clientWidth, scroller.clientWidth, 320);
+		const strokeBottom = this.maxStrokeBottomY();
+		const hasContent = this.doc.strokes.length > 0 || this.activeStroke !== null || (this.magicDiaryMode && this.magicMaxReplyBottomY > 0);
+		const inkExtendedHeight = hasContent
+			? Math.ceil(strokeBottom) + BLANK_NOTE_GROW_BUFFER_PX
+			: 0;
+		const minInteractiveHeight = (this.enabled && this.getTool() !== 'pan') || this.magicDiaryMode ? 600 : 0;
+		const height = Math.max(
+			content.scrollHeight,
+			content.clientHeight,
+			scroller.clientHeight,
+			inkExtendedHeight,
+			minInteractiveHeight,
+		);
+		return { width, height };
 	}
 
 	private syncLayerSize(): void {
 		const content = this.view.contentDOM;
 		const scroller = this.scrollerEl;
-		this.layer.style.width = `${content.scrollWidth}px`;
-		this.layer.style.height = `${content.scrollHeight}px`;
+		const { width, height } = this.computeCanvasDimensions();
+		this.layer.style.width = `${width}px`;
+		this.layer.style.height = `${height}px`;
 
 		// Strokes are stored in the content box's own coordinates. The layer now
 		// hangs off the scroller, so it needs the content's offset inside that
@@ -617,11 +1012,11 @@ export class MdInkOverlay {
 
 	private renderStrokes(): void {
 		const group = this.strokeGroup;
-		group.replaceChildren();
-
 		const lineTops = new Map<number, number>();
+		const seenIds = new Set<string>();
 
 		for (const stroke of this.doc.strokes) {
+			seenIds.add(stroke.id);
 			const line = this.lineOf(stroke);
 			const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
 
@@ -634,21 +1029,42 @@ export class MdInkOverlay {
 			const pathData = stroke.points.length === 1
 				? dotPath(stroke.points[0][0], stroke.points[0][1], stroke.style.size / 2)
 				: getRenderedStrokeData(stroke).pathD;
-			const path = document.createElementNS(SVG_NS, 'path');
-			path.setAttribute('d', pathData);
-			path.setAttribute('fill', stroke.style.color || 'currentColor');
+
+			let path = this.pathElements.get(stroke.id);
+			if (!path) {
+				path = document.createElementNS(SVG_NS, 'path');
+				path.dataset.strokeId = stroke.id;
+				this.pathElements.set(stroke.id, path);
+			}
+			if (path.getAttribute('d') !== pathData) {
+				path.setAttribute('d', pathData);
+			}
+			const fill = stroke.style.color || 'currentColor';
+			if (path.getAttribute('fill') !== fill) {
+				path.setAttribute('fill', fill);
+			}
 			if (stroke.style.opacity !== undefined && stroke.style.opacity < 1) {
-				path.setAttribute('opacity', String(stroke.style.opacity));
+				const op = String(stroke.style.opacity);
+				if (path.getAttribute('opacity') !== op) path.setAttribute('opacity', op);
+			} else if (path.hasAttribute('opacity')) {
+				path.removeAttribute('opacity');
 			}
-			if (this.selectedIds.has(stroke.id)) {
-				path.classList.add('is-selected');
+			path.classList.toggle('is-selected', this.selectedIds.has(stroke.id));
+			path.classList.toggle('is-magic-reading', this.magicReadingStrokeIds.has(stroke.id));
+			const transform = `translate(${stroke.offset.x} ${top + stroke.offset.y})`;
+			if (path.getAttribute('transform') !== transform) {
+				path.setAttribute('transform', transform);
 			}
-			path.setAttribute(
-				'transform',
-				`translate(${stroke.offset.x} ${top + stroke.offset.y})`,
-			);
-			path.dataset.strokeId = stroke.id;
-			group.appendChild(path);
+			if (path.parentNode !== group) {
+				group.appendChild(path);
+			}
+		}
+
+		for (const [id, path] of this.pathElements) {
+			if (!seenIds.has(id)) {
+				path.remove();
+				this.pathElements.delete(id);
+			}
 		}
 	}
 
@@ -657,9 +1073,7 @@ export class MdInkOverlay {
 		const paper = this.options.paper;
 		if (paper === 'none') return;
 
-		const content = this.view.contentDOM;
-		const width = Math.max(content.scrollWidth, content.clientWidth);
-		const height = Math.max(content.scrollHeight, content.clientHeight);
+		const { width, height } = this.computeCanvasDimensions();
 		const spacing = 24;
 
 		const fragment = document.createDocumentFragment();
@@ -740,6 +1154,13 @@ export class MdInkOverlay {
 				return;
 			}
 
+			if ((event.ctrlKey || event.metaKey) && (event.key === 'd' || event.key === 'D') && this.selectedIds.size > 0) {
+				event.preventDefault();
+				event.stopPropagation();
+				this.duplicateSelected();
+				return;
+			}
+
 			if (event.key === 'Escape' && this.selectedIds.size > 0) {
 				this.selectedIds.clear();
 				this.render();
@@ -777,6 +1198,34 @@ export class MdInkOverlay {
 		this.syncPill();
 	}
 
+	private isPointInSelectionBounds(x: number, y: number, pad = 12): boolean {
+		if (this.selectedIds.size === 0) return false;
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		let found = false;
+
+		for (const stroke of this.doc.strokes) {
+			if (!this.selectedIds.has(stroke.id)) continue;
+			const line = this.lineOf(stroke);
+			const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
+			const top = this.lineTopInContent(lineNumber) ?? 0;
+			for (const [px, py] of stroke.points) {
+				const lx = px + stroke.offset.x;
+				const ly = py + stroke.offset.y + top;
+				if (lx < minX) minX = lx;
+				if (ly < minY) minY = ly;
+				if (lx > maxX) maxX = lx;
+				if (ly > maxY) maxY = ly;
+				found = true;
+			}
+		}
+
+		if (!found) return false;
+		return x >= minX - pad && x <= maxX + pad && y >= minY - pad && y <= maxY + pad;
+	}
+
 	private onPointerDown(event: PointerEvent): void {
 		if (event.button !== 0 && event.button !== 5) return;
 		if (this.getTool() === 'pan') return;
@@ -799,6 +1248,7 @@ export class MdInkOverlay {
 			return;
 		}
 
+		this.stylePopover?.close();
 		event.preventDefault();
 		event.stopPropagation();
 		this.activePointerId = event.pointerId;
@@ -808,28 +1258,41 @@ export class MdInkOverlay {
 		const origin = this.contentOrigin();
 		const local = { x: event.clientX - origin.x, y: event.clientY - origin.y };
 
+		// Stylus tail eraser (button 5) or Mod-key temporary eraser while pen/highlighter is active.
+		const isTransientEraser = event.button === 5
+			|| ((tool === 'pen' || tool === 'highlighter') && (event.ctrlKey || event.metaKey));
+		if (tool === 'eraser' || isTransientEraser) {
+			this.transientEraser = isTransientEraser;
+			this.eraseAt(event.clientX, event.clientY);
+			return;
+		}
+
 		if (tool === 'lasso') {
 			this.lassoStart = local;
 			this.dragStart = local;
-			this.lassoRect.style.display = '';
-			this.lassoRect.setAttribute('x', String(local.x));
-			this.lassoRect.setAttribute('y', String(local.y));
-			this.lassoRect.setAttribute('width', '0');
-			this.lassoRect.setAttribute('height', '0');
 
-			if (this.selectedIds.size > 0) {
+			if (this.selectedIds.size > 0 && this.isPointInSelectionBounds(local.x, local.y)) {
+				this.lassoMode = 'move';
+				this.lassoRect.style.display = 'none';
 				this.dragOrigins.clear();
 				for (const stroke of this.doc.strokes) {
 					if (this.selectedIds.has(stroke.id)) {
 						this.dragOrigins.set(stroke.id, { ...stroke.offset });
 					}
 				}
+			} else {
+				this.lassoMode = 'select';
+				if (this.selectedIds.size > 0) {
+					this.selectedIds.clear();
+					this.dragOrigins.clear();
+					this.render();
+				}
+				this.lassoRect.style.display = '';
+				this.lassoRect.setAttribute('x', String(local.x));
+				this.lassoRect.setAttribute('y', String(local.y));
+				this.lassoRect.setAttribute('width', '0');
+				this.lassoRect.setAttribute('height', '0');
 			}
-			return;
-		}
-
-		if (tool === 'eraser') {
-			this.eraseAt(event.clientX, event.clientY);
 			return;
 		}
 
@@ -837,14 +1300,60 @@ export class MdInkOverlay {
 		const line = this.lineAtScreen(event.clientX, event.clientY);
 		const lineText = this.view.state.doc.line(line).text;
 		const localPoint = this.screenToLocal(event.clientX, event.clientY, line);
+		const initialPressure = this.pressureFor(event);
+		const hasRealPressure = event.pointerType === 'pen' && event.pressure > 0 && Math.abs(event.pressure - 0.5) > 0.005;
+		const style = this.buildStyle(this.effectiveBrush());
+		if (hasRealPressure) style.simulatePressure = false;
 
+		this.clearHoldSnapTimer();
+		if (this.magicDiaryMode) {
+			this.clearMagicPauseTimer();
+			if (this.magicStatusEl) {
+				this.magicStatusEl.textContent = t('Listening to your handwriting…');
+			}
+		}
 		this.activeStroke = {
-			points: [[localPoint.x, localPoint.y, this.pressureFor(event)]],
-			style: this.buildStyle(this.options.brush),
+			points: [[localPoint.x, localPoint.y, initialPressure]],
+			style,
 			anchorLine: line,
 			anchorText: lineText,
+			lastPressure: initialPressure,
+			hasRealPressure,
 		};
 		this.renderLiveStroke();
+	}
+
+	private clearHoldSnapTimer(): void {
+		if (this.holdSnapTimer !== null) {
+			clearTimeout(this.holdSnapTimer);
+			this.holdSnapTimer = null;
+		}
+		this.holdAnchorScreen = null;
+	}
+
+	private scheduleHoldSnap(clientX: number, clientY: number): void {
+		if (!this.options.shapeSnap || !this.activeStroke || this.activeStroke.snappedByHold) return;
+		if (
+			this.holdAnchorScreen
+			&& Math.hypot(clientX - this.holdAnchorScreen.x, clientY - this.holdAnchorScreen.y) <= HOLD_SNAP_JITTER_PX
+			&& this.holdSnapTimer !== null
+		) {
+			return;
+		}
+		if (this.holdSnapTimer !== null) {
+			clearTimeout(this.holdSnapTimer);
+		}
+		this.holdAnchorScreen = { x: clientX, y: clientY };
+		this.holdSnapTimer = setTimeout(() => {
+			this.holdSnapTimer = null;
+			if (!this.activeStroke || this.activeStroke.snappedByHold || this.activeStroke.points.length < 3) return;
+			const snapped = snapStrokePoints(this.activeStroke.points, HOLD_TO_SNAP_TOLERANCE);
+			if (snapped !== this.activeStroke.points) {
+				this.activeStroke.points = snapped;
+				this.activeStroke.snappedByHold = true;
+				this.renderLiveStroke();
+			}
+		}, HOLD_TO_SNAP_DELAY_MS);
 	}
 
 	/**
@@ -875,9 +1384,9 @@ export class MdInkOverlay {
 
 	private reticleRadius(): number {
 		const tool = this.getTool();
-		if (tool === 'eraser') return this.options.eraserRadius;
+		if (tool === 'eraser' || this.transientEraser) return this.options.eraserRadius;
 		if (tool === 'lasso') return 4;
-		const preset = resolveBrushPreset(this.options.brush);
+		const preset = resolveBrushPreset(this.effectiveBrush());
 		return Math.max(2, (this.options.size * preset.sizeMultiplier) / 2);
 	}
 
@@ -889,17 +1398,8 @@ export class MdInkOverlay {
 		if (tool === 'lasso' && this.lassoStart) {
 			const origin = this.contentOrigin();
 			const local = { x: event.clientX - origin.x, y: event.clientY - origin.y };
-			const x = Math.min(this.lassoStart.x, local.x);
-			const y = Math.min(this.lassoStart.y, local.y);
-			const width = Math.abs(local.x - this.lassoStart.x);
-			const height = Math.abs(local.y - this.lassoStart.y);
-			this.lassoRect.setAttribute('x', String(x));
-			this.lassoRect.setAttribute('y', String(y));
-			this.lassoRect.setAttribute('width', String(width));
-			this.lassoRect.setAttribute('height', String(height));
 
-			// Dragging an existing selection moves it instead of starting a new box.
-			if (this.selectedIds.size > 0 && this.dragOrigins.size > 0) {
+			if (this.lassoMode === 'move' && this.selectedIds.size > 0 && this.dragOrigins.size > 0) {
 				const dx = local.x - (this.dragStart?.x ?? local.x);
 				const dy = local.y - (this.dragStart?.y ?? local.y);
 				for (const stroke of this.doc.strokes) {
@@ -908,11 +1408,21 @@ export class MdInkOverlay {
 					stroke.offset = { x: original.x + dx, y: original.y + dy };
 				}
 				this.requestRender();
+				return;
 			}
+
+			const x = Math.min(this.lassoStart.x, local.x);
+			const y = Math.min(this.lassoStart.y, local.y);
+			const width = Math.abs(local.x - this.lassoStart.x);
+			const height = Math.abs(local.y - this.lassoStart.y);
+			this.lassoRect.setAttribute('x', String(x));
+			this.lassoRect.setAttribute('y', String(y));
+			this.lassoRect.setAttribute('width', String(width));
+			this.lassoRect.setAttribute('height', String(height));
 			return;
 		}
 
-		if (tool === 'eraser' && this.activePointerId !== null) {
+		if ((tool === 'eraser' || this.transientEraser) && this.activePointerId !== null) {
 			this.eraseAt(event.clientX, event.clientY);
 			return;
 		}
@@ -921,23 +1431,52 @@ export class MdInkOverlay {
 		if (event.pointerId !== this.activePointerId) return;
 
 		const line = this.activeStroke.anchorLine;
-		const localPoint = this.screenToLocal(event.clientX, event.clientY, line);
-		const last = this.activeStroke.points[this.activeStroke.points.length - 1];
-		if (last) {
-			const dx = localPoint.x - last[0];
-			const dy = localPoint.y - last[1];
-			if (Math.hypot(dx, dy) < MIN_POINT_DISTANCE) return;
+		if (this.activeStroke.snappedByHold) {
+			if (this.activeStroke.points.length === 2) {
+				const localPoint = this.screenToLocal(event.clientX, event.clientY, line);
+				const pressure = this.activeStroke.points[1][2];
+				this.activeStroke.points[1] = [localPoint.x, localPoint.y, pressure];
+				this.renderLiveStroke();
+			}
+			return;
 		}
-		this.activeStroke.points.push([localPoint.x, localPoint.y, this.pressureFor(event)]);
-		this.renderLiveStroke();
+
+		const samples = getPointerSamples(event);
+		let appended = false;
+		for (const sample of samples) {
+			const localPoint = this.screenToLocal(sample.clientX, sample.clientY, line);
+			const last = this.activeStroke.points[this.activeStroke.points.length - 1];
+			if (last) {
+				const dx = localPoint.x - last[0];
+				const dy = localPoint.y - last[1];
+				if (Math.hypot(dx, dy) < MIN_POINT_DISTANCE) continue;
+			}
+			const rawPressure = this.pressureFor(sample);
+			if (sample.pointerType === 'pen' && sample.pressure > 0 && Math.abs(sample.pressure - 0.5) > 0.005) {
+				this.activeStroke.hasRealPressure = true;
+				this.activeStroke.style.simulatePressure = false;
+			}
+			const smoothedPressure = this.activeStroke.hasRealPressure
+				? this.activeStroke.lastPressure + (rawPressure - this.activeStroke.lastPressure) * 0.55
+				: rawPressure;
+			this.activeStroke.lastPressure = smoothedPressure;
+			this.activeStroke.points.push([localPoint.x, localPoint.y, smoothedPressure]);
+			appended = true;
+		}
+		if (appended) {
+			this.renderLiveStroke();
+		}
+		this.scheduleHoldSnap(event.clientX, event.clientY);
 	}
 
 	private onPointerUp(event: PointerEvent): void {
+		this.clearHoldSnapTimer();
 		if (event.pointerId !== this.activePointerId) {
 			if (this.lassoStart) this.finishLasso();
 			return;
 		}
 
+		this.transientEraser = false;
 		const tool = this.getTool();
 
 		if (tool === 'lasso') {
@@ -947,9 +1486,12 @@ export class MdInkOverlay {
 
 		if (this.activeStroke) {
 			const rawPoints = this.activeStroke.points;
+			const finalPoints = this.activeStroke.snappedByHold
+				? rawPoints
+				: (this.options.shapeSnap ? snapStrokePoints(rawPoints, 6) : rawPoints);
 			const stroke: MdInkStroke = {
 				id: newStrokeId(),
-				points: this.options.shapeSnap ? snapStrokePoints(rawPoints, 6) : rawPoints,
+				points: finalPoints,
 				style: this.activeStroke.style,
 				anchor: {
 					line: this.activeStroke.anchorLine,
@@ -980,11 +1522,14 @@ export class MdInkOverlay {
 	 * frames of an accidental touch must not survive the zoom.
 	 */
 	private abortActiveStroke(): void {
+		this.clearHoldSnapTimer();
 		if (this.activePointerId !== null) {
 			this.layer.releasePointerCapture?.(this.activePointerId);
 		}
+		this.transientEraser = false;
 		this.activeStroke = null;
 		this.livePath.setAttribute('d', '');
+		this.lassoMode = null;
 		this.lassoStart = null;
 		this.lassoRect.style.display = 'none';
 		this.activePointerId = null;
@@ -1017,6 +1562,10 @@ export class MdInkOverlay {
 		this.redoStack = [];
 		this.emitChange();
 		this.requestRender();
+		if (this.magicDiaryMode) {
+			this.magicPendingStrokeIds.add(stroke.id);
+			this.scheduleMagicDiaryTurn();
+		}
 	}
 
 	private eraseAt(clientX: number, clientY: number): void {
@@ -1060,26 +1609,19 @@ export class MdInkOverlay {
 		this.requestRender();
 	}
 
-	/** Sampled centreline points, enough for hit testing. */
+	/** Sampled centreline points (including segment midpoints for snapped lines), enough for hit testing. */
 	private strokeLocalPoints(stroke: MdInkStroke): Array<[number, number]> {
-		return stroke.points.map(([x, y]) => [x, y] as [number, number]);
+		const pts = stroke.points.map(([x, y]) => [x, y] as [number, number]);
+		if (pts.length === 2) {
+			pts.push([(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]);
+		}
+		return pts;
 	}
 
 	private finishLasso(): void {
 		if (!this.lassoStart || !this.dragStart) return;
 
-		// The box and the stroke points are both in content coordinates already.
-		const rectData = {
-			x: parseFloat(this.lassoRect.getAttribute('x') ?? '0'),
-			y: parseFloat(this.lassoRect.getAttribute('y') ?? '0'),
-			width: parseFloat(this.lassoRect.getAttribute('width') ?? '0'),
-			height: parseFloat(this.lassoRect.getAttribute('height') ?? '0'),
-		};
-
-		const isClick = rectData.width < 3 && rectData.height < 3 && this.selectedIds.size === 0;
-		const isMoveDrag = this.selectedIds.size > 0 && this.dragOrigins.size > 0;
-
-		if (isMoveDrag) {
+		if (this.lassoMode === 'move') {
 			const shifts = [];
 			for (const stroke of this.doc.strokes) {
 				const original = this.dragOrigins.get(stroke.id);
@@ -1093,40 +1635,178 @@ export class MdInkOverlay {
 				this.redoStack = [];
 				this.emitChange();
 			}
-		} else if (!isClick) {
-			// Box selection: a stroke is selected when its whole centreline is inside.
-			this.selectedIds.clear();
-			for (const stroke of this.doc.strokes) {
-				const line = this.lineOf(stroke);
-				const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
-				const top = this.lineTopInContent(lineNumber) ?? 0;
-				const points = this.strokeLocalPoints(stroke);
-				const inside = points.every(([x, y]) => {
-					const localX = x + stroke.offset.x;
-					const localY = y + stroke.offset.y + top;
-					return localX >= rectData.x
-						&& localX <= rectData.x + rectData.width
-						&& localY >= rectData.y
-						&& localY <= rectData.y + rectData.height;
-				});
-				if (inside) this.selectedIds.add(stroke.id);
-			}
-			this.render();
 		} else {
+			// The box and the stroke points are both in content coordinates already.
+			const rectData = {
+				x: parseFloat(this.lassoRect.getAttribute('x') ?? '0'),
+				y: parseFloat(this.lassoRect.getAttribute('y') ?? '0'),
+				width: parseFloat(this.lassoRect.getAttribute('width') ?? '0'),
+				height: parseFloat(this.lassoRect.getAttribute('height') ?? '0'),
+			};
+
+			const isClick = rectData.width < 3 && rectData.height < 3;
 			this.selectedIds.clear();
+
+			if (!isClick) {
+				for (const stroke of this.doc.strokes) {
+					const line = this.lineOf(stroke);
+					const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
+					const top = this.lineTopInContent(lineNumber) ?? 0;
+					const points = this.strokeLocalPoints(stroke);
+					if (points.length === 0) continue;
+					let insideCount = 0;
+					for (const [x, y] of points) {
+						const localX = x + stroke.offset.x;
+						const localY = y + stroke.offset.y + top;
+						if (
+							localX >= rectData.x
+							&& localX <= rectData.x + rectData.width
+							&& localY >= rectData.y
+							&& localY <= rectData.y + rectData.height
+						) {
+							insideCount += 1;
+						}
+					}
+					if (insideCount / points.length >= 0.5) {
+						this.selectedIds.add(stroke.id);
+					}
+				}
+			}
 			this.render();
 		}
 
+		this.lassoMode = null;
 		this.lassoStart = null;
 		this.dragStart = null;
 		this.dragOrigins.clear();
 		this.lassoRect.style.display = 'none';
 		this.activePointerId = null;
+		this.syncSelectionBar();
+	}
+
+	private computeStrokeIdsBounds(ids: ReadonlySet<string>): { minX: number; minY: number; maxX: number; maxY: number } | null {
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		let found = false;
+
+		for (const stroke of this.doc.strokes) {
+			if (!ids.has(stroke.id)) continue;
+			const line = this.lineOf(stroke);
+			const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
+			const top = this.lineTopInContent(lineNumber) ?? 0;
+			for (const [px, py] of stroke.points) {
+				const lx = px + stroke.offset.x;
+				const ly = py + stroke.offset.y + top;
+				if (lx < minX) minX = lx;
+				if (ly < minY) minY = ly;
+				if (lx > maxX) maxX = lx;
+				if (ly > maxY) maxY = ly;
+				found = true;
+			}
+		}
+
+		return found ? { minX, minY, maxX, maxY } : null;
+	}
+
+	private syncSelectionBar(): void {
+		const bar = this.selectionBar;
+		if (!bar) return;
+		if (!this.enabled || this.selectedIds.size === 0 || this.lassoMode !== null) {
+			bar.style.display = 'none';
+			return;
+		}
+		const bounds = this.computeStrokeIdsBounds(this.selectedIds);
+		if (!bounds) {
+			bar.style.display = 'none';
+			return;
+		}
+		bar.style.display = 'flex';
+		const { width: canvasWidth } = this.computeCanvasDimensions();
+		const centerX = (bounds.minX + bounds.maxX) / 2;
+		const barWidth = 240;
+		const clampedLeft = Math.max(8, Math.min(centerX - barWidth / 2, Math.max(8, canvasWidth - barWidth - 8)));
+		const top = bounds.minY > 48 ? bounds.minY - 42 : bounds.maxY + 12;
+		bar.style.left = `${Math.round(clampedLeft)}px`;
+		bar.style.top = `${Math.round(top)}px`;
 	}
 
 	///////////////////////////
 	// Public commands
 	///////////////////////////
+
+	recolourSelected(colour: string): boolean {
+		if (this.selectedIds.size === 0) return false;
+		const changes: Array<{ id: string; fromColor: string; toColor: string }> = [];
+		for (const stroke of this.doc.strokes) {
+			if (!this.selectedIds.has(stroke.id)) continue;
+			if (stroke.style.color === colour) continue;
+			changes.push({ id: stroke.id, fromColor: stroke.style.color, toColor: colour });
+			stroke.style = { ...stroke.style, color: colour };
+		}
+		if (changes.length === 0) return false;
+		this.undoStack.push({ type: 'restyle', changes });
+		this.redoStack = [];
+		this.emitChange();
+		this.render();
+		return true;
+	}
+
+	duplicateSelected(): boolean {
+		if (this.selectedIds.size === 0) return false;
+		const selected = this.doc.strokes.filter((s) => this.selectedIds.has(s.id));
+		if (selected.length === 0) return false;
+		const added: MdInkStroke[] = [];
+		const nextSelected = new Set<string>();
+		for (const stroke of selected) {
+			const clone: MdInkStroke = {
+				id: newStrokeId(),
+				points: stroke.points.map((pt) => [...pt] as InkPoint),
+				style: { ...stroke.style },
+				anchor: { ...stroke.anchor },
+				offset: { x: stroke.offset.x + 18, y: stroke.offset.y + 18 },
+				createdAt: Date.now(),
+			};
+			added.push(clone);
+			nextSelected.add(clone.id);
+		}
+		this.doc.strokes.push(...added);
+		this.selectedIds = nextSelected;
+		this.undoStack.push({ type: 'addMany', strokes: added });
+		this.redoStack = [];
+		this.emitChange();
+		this.render();
+		return true;
+	}
+
+	async transcribeSelected(): Promise<string | null> {
+		if (this.selectedIds.size === 0) return null;
+		const provider = normalizeCustomTranscriptionProvider(this.options.getAiSettings?.());
+		if (!isCustomTranscriptionProviderUsable(provider)) {
+			new Notice(t('Enable a custom API in settings first.'));
+			return null;
+		}
+		try {
+			const svg = this.buildSvgForStrokeIds(this.selectedIds, {
+				background: '#ffffff',
+				defaultInkColour: '#111111',
+			});
+			const media = await prepareProviderMedia(svg, provider.mediaFormat);
+			const transcript = (await requestCustomTranscription({ settings: provider, media })).trim();
+			if (!transcript) {
+				new Notice(t('Nothing to transcribe'));
+				return null;
+			}
+			await navigator.clipboard?.writeText(transcript);
+			new Notice(t('Transcript copied to clipboard'));
+			return transcript;
+		} catch (error) {
+			console.warn('[bimo] selection transcription failed', error);
+			new Notice(t('Could not reach the endpoint. Check the settings and the key.'));
+			return null;
+		}
+	}
 
 	deleteSelected(): void {
 		if (this.selectedIds.size === 0) return;
@@ -1196,6 +1876,18 @@ export class MdInkOverlay {
 			}
 			return;
 		}
+		if (entry.type === 'restyle') {
+			for (const change of entry.changes) {
+				const stroke = this.doc.strokes.find((s) => s.id === change.id);
+				if (stroke) {
+					stroke.style = {
+						...stroke.style,
+						color: direction === 'undo' ? change.fromColor : change.toColor,
+					};
+				}
+			}
+			return;
+		}
 		for (const shift of entry.shifts) {
 			const stroke = this.doc.strokes.find((s) => s.id === shift.id);
 			if (stroke) stroke.offset = { ...(direction === 'undo' ? shift.from : shift.to) };
@@ -1221,17 +1913,23 @@ export class MdInkOverlay {
 	 * Serialise the lasso selection for the system clipboard.
 	 *
 	 * Coordinates stay local to each stroke's anchor, and the payload carries the
-	 * anchor text, so a paste into another note can re-anchor instead of dumping
-	 * a diagram at line 1.
+	 * anchor text and relative line delta (`lineDelta`), so a multi-line selection
+	 * pasted into another note preserves its vertical spacing across lines.
 	 */
 	copySelected(): string | null {
 		const selected = this.doc.strokes.filter((stroke) => this.selectedIds.has(stroke.id));
 		if (selected.length === 0) return null;
 
+		const resolvedLineNumber = (stroke: MdInkStroke): number => {
+			const idx = this.lineOf(stroke);
+			return idx !== null ? idx + 1 : stroke.anchor.line;
+		};
+
 		// Normalise so the group keeps its internal layout regardless of where the
 		// first stroke sat on its line.
 		const originX = Math.min(...selected.map((s) => s.offset.x));
 		const originY = Math.min(...selected.map((s) => s.offset.y));
+		const baseLine = Math.min(...selected.map(resolvedLineNumber));
 
 		return JSON.stringify({
 			bimo: 'md-ink',
@@ -1240,6 +1938,7 @@ export class MdInkOverlay {
 				points: stroke.points,
 				style: stroke.style,
 				anchor: stroke.anchor,
+				lineDelta: resolvedLineNumber(stroke) - baseLine,
 				offset: { x: stroke.offset.x - originX, y: stroke.offset.y - originY },
 			})),
 		});
@@ -1256,8 +1955,8 @@ export class MdInkOverlay {
 	/**
 	 * Insert a copied payload at the caret's line.
 	 *
-	 * The strokes land on the line the user is editing now, not on the line they
-	 * were copied from — that is the whole point of pasting into another note.
+	 * The strokes land relative to the line the user is editing now, preserving
+	 * any multi-line `lineDelta` spacing between strokes.
 	 */
 	paste(payload: string): boolean {
 		let parsed: unknown;
@@ -1267,22 +1966,36 @@ export class MdInkOverlay {
 			return false;
 		}
 
-		const data = parsed as { bimo?: string; strokes?: Array<Partial<MdInkStroke>> };
+		const data = parsed as { bimo?: string; strokes?: Array<Partial<MdInkStroke> & { lineDelta?: number }> };
 		if (data.bimo !== 'md-ink' || !Array.isArray(data.strokes) || data.strokes.length === 0) {
 			return false;
 		}
 
-		const currentLine = this.view.state.doc.lineAt(this.view.state.selection.main.head);
+		const doc = this.view.state.doc;
+		const currentLine = doc.lineAt(this.view.state.selection.main.head);
+		const totalLines = doc.lines;
 		const added: MdInkStroke[] = [];
 
 		for (const raw of data.strokes) {
 			if (!Array.isArray(raw.points) || !raw.style) continue;
+			const lineDelta = typeof raw.lineDelta === 'number' && Number.isFinite(raw.lineDelta)
+				? Math.round(raw.lineDelta)
+				: 0;
+			const desiredLineNum = currentLine.number + lineDelta;
+			const clampedLineNum = Math.min(Math.max(1, desiredLineNum), totalLines);
+			const targetLine = doc.line(clampedLineNum);
+			const overflowLines = Math.max(0, desiredLineNum - totalLines);
+			const baseOffset = raw.offset ?? { x: 0, y: 0 };
+
 			added.push({
 				id: newStrokeId(),
 				points: raw.points,
 				style: raw.style,
-				anchor: { line: currentLine.number, lineText: fingerprintLine(currentLine.text) },
-				offset: raw.offset ?? { x: 0, y: 0 },
+				anchor: { line: targetLine.number, lineText: fingerprintLine(targetLine.text) },
+				offset: {
+					x: baseOffset.x,
+					y: baseOffset.y + overflowLines * 24,
+				},
 				createdAt: Date.now(),
 			});
 		}
@@ -1296,11 +2009,12 @@ export class MdInkOverlay {
 		return true;
 	}
 
-	/** Build a standalone SVG of every stroke, for export or for embedding. */
-	buildSvg(): string {
+	/** Build a standalone SVG of every stroke, for export or for AI transcription. */
+	buildSvg(options?: { background?: string; defaultInkColour?: string }): string {
 		const lines = this.docLines();
 		const parts: string[] = [];
 		let maxY = 0;
+		const fallbackColour = options?.defaultInkColour ?? 'currentColor';
 
 		for (const stroke of this.doc.strokes) {
 			const line = resolveAnchorLine(lines, stroke.anchor);
@@ -1312,24 +2026,311 @@ export class MdInkOverlay {
 			const opacity = stroke.style.opacity !== undefined && stroke.style.opacity < 1
 				? ` opacity="${stroke.style.opacity}"`
 				: '';
+			const rawColour = stroke.style.color || 'currentColor';
+			const fill = rawColour === 'currentColor' ? fallbackColour : rawColour;
 			parts.push(
-				`<path d="${data.pathD}" fill="${stroke.style.color || 'currentColor'}"${opacity} transform="translate(${stroke.offset.x} ${top + stroke.offset.y})"/>`,
+				`<path d="${data.pathD}" fill="${fill}"${opacity} transform="translate(${stroke.offset.x} ${top + stroke.offset.y})"/>`,
 			);
 		}
 
 		const width = Math.max(this.view.contentDOM.scrollWidth, 320);
 		const height = Math.max(Math.ceil(maxY) + 120, this.view.contentDOM.scrollHeight, 200);
+		const bgRect = options?.background
+			? `<rect width="100%" height="100%" fill="${options.background}"/>`
+			: null;
 
 		return [
 			`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
 			'<style>path{stroke:none}</style>',
+			...(bgRect ? [bgRect] : []),
 			...parts,
 			'</svg>',
 		].join('\n');
 	}
 
+	/** Build a tightly cropped standalone SVG for a specific subset of stroke IDs. */
+	buildSvgForStrokeIds(
+		ids: ReadonlySet<string>,
+		options?: { background?: string; defaultInkColour?: string },
+	): string {
+		const bounds = this.computeStrokeIdsBounds(ids);
+		if (!bounds) return this.buildSvg(options);
+		const pad = 24;
+		const minX = Math.floor(bounds.minX - pad);
+		const minY = Math.floor(bounds.minY - pad);
+		const width = Math.max(120, Math.ceil(bounds.maxX - bounds.minX + pad * 2));
+		const height = Math.max(80, Math.ceil(bounds.maxY - bounds.minY + pad * 2));
+		const lines = this.docLines();
+		const fallbackColour = options?.defaultInkColour ?? '#111111';
+		const parts: string[] = [];
+
+		for (const stroke of this.doc.strokes) {
+			if (!ids.has(stroke.id)) continue;
+			const line = resolveAnchorLine(lines, stroke.anchor);
+			const lineNumber = line !== null ? line + 1 : stroke.anchor.line;
+			const top = this.lineTopInContent(lineNumber) ?? 0;
+			const data = getRenderedStrokeData(stroke);
+			const opacity = stroke.style.opacity !== undefined && stroke.style.opacity < 1
+				? ` opacity="${stroke.style.opacity}"`
+				: '';
+			const rawColour = stroke.style.color || 'currentColor';
+			const fill = rawColour === 'currentColor' ? fallbackColour : rawColour;
+			parts.push(
+				`<path d="${data.pathD}" fill="${fill}"${opacity} transform="translate(${stroke.offset.x - minX} ${top + stroke.offset.y - minY})"/>`,
+			);
+		}
+
+		const bgRect = options?.background
+			? `<rect width="100%" height="100%" fill="${options.background}"/>`
+			: null;
+
+		return [
+			`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
+			'<style>path{stroke:none}</style>',
+			...(bgRect ? [bgRect] : []),
+			...parts,
+			'</svg>',
+		].join('\n');
+	}
+
+	///////////////////////////
+	// Magic Diary Page ("魔法书页 · 你写一句，AI写一句")
+	///////////////////////////
+
+	private checkMagicFrontmatter(): void {
+		if (this.magicAutoChecked) return;
+		const raw = this.view.state.doc.toString();
+		if (!raw) return;
+		this.magicAutoChecked = true;
+		if (hasMagicDiaryFrontmatter(raw) && !this.magicDiaryMode) {
+			this.setMagicDiaryMode(true, { silent: true });
+		}
+	}
+
+	isMagicDiaryMode(): boolean {
+		return this.magicDiaryMode;
+	}
+
+	setMagicDiaryMode(active: boolean, opts?: { silent?: boolean }): void {
+		this.magicDiaryMode = active;
+		this.layer.dataset.magicDiary = active ? 'true' : 'false';
+		this.scrollerEl.classList.toggle('bimo-magic-diary-active', active);
+		this.magicBtn?.classList.toggle('is-active', active);
+
+		if (this.magicBannerEl) {
+			this.magicBannerEl.style.display = active ? 'flex' : 'none';
+		}
+		if (this.magicRepliesContainer) {
+			this.magicRepliesContainer.style.display = active ? 'block' : 'none';
+		}
+
+		if (active) {
+			if (this.getTool() === 'pan') {
+				this.options.onToolSelected?.('pen');
+				this.setTool('pen');
+			}
+			if (this.options.paper === 'none') {
+				this.setPaper('ruled');
+			}
+			if (this.magicStatusEl) {
+				this.magicStatusEl.textContent = t('Magic Diary Page · Write a line and pause; the page will answer');
+			}
+			if (!opts?.silent) {
+				new Notice(t('✦ Magic Diary Page awakened — write a line and pause; the page will answer.'));
+			}
+		} else {
+			this.clearMagicPauseTimer();
+			this.magicPendingStrokeIds.clear();
+			this.magicReadingStrokeIds.clear();
+			if (!opts?.silent) {
+				new Notice(t('Magic Diary Page closed.'));
+			}
+		}
+		this.render();
+	}
+
+	private clearMagicPauseTimer(): void {
+		if (this.magicPauseTimer !== null) {
+			clearTimeout(this.magicPauseTimer);
+			this.magicPauseTimer = null;
+		}
+	}
+
+	private scheduleMagicDiaryTurn(): void {
+		this.clearMagicPauseTimer();
+		if (this.magicStatusEl) {
+			this.magicStatusEl.textContent = t('Listening to your handwriting…');
+		}
+		this.magicPauseTimer = setTimeout(() => {
+			this.magicPauseTimer = null;
+			void this.triggerMagicDiaryTurn(false);
+		}, MAGIC_DIARY_PAUSE_MS);
+	}
+
+	async triggerMagicDiaryTurn(manual = false): Promise<void> {
+		if (this.destroyed || !this.magicDiaryMode) return;
+		this.clearMagicPauseTimer();
+
+		let targetIds = new Set(this.magicPendingStrokeIds);
+		if (targetIds.size === 0 && manual && this.doc.strokes.length > 0) {
+			const recent = this.doc.strokes.slice(-8);
+			targetIds = new Set(recent.map((s) => s.id));
+		}
+		if (targetIds.size === 0) return;
+
+		this.magicPendingStrokeIds.clear();
+		for (const id of targetIds) this.magicReadingStrokeIds.add(id);
+		if (this.magicStatusEl) {
+			this.magicStatusEl.textContent = t('The page is absorbing your ink…');
+		}
+		this.renderStrokes();
+
+		const bounds = this.computeStrokeIdsBounds(targetIds) ?? {
+			minX: 36,
+			minY: 48,
+			maxX: 280,
+			maxY: Math.max(96, this.maxStrokeBottomY()),
+		};
+
+		try {
+			const svg = this.buildSvgForStrokeIds(targetIds, {
+				background: '#fbf6e9',
+				defaultInkColour: '#2c1e14',
+			});
+			const result = await requestMagicDiaryTurn({
+				svg,
+				rawSettings: this.options.getAiSettings?.(),
+				history: this.magicHistory,
+			});
+			if (this.destroyed) return;
+
+			for (const id of targetIds) this.magicReadingStrokeIds.delete(id);
+			this.renderStrokes();
+
+			if (!result.reply) {
+				if (this.magicStatusEl) {
+					this.magicStatusEl.textContent = t('Magic Diary Page · Write a line and pause; the page will answer');
+				}
+				return;
+			}
+
+			this.magicHistory.push(
+				{ role: 'user', text: result.heard || '(handwritten ink)' },
+				{ role: 'assistant', text: result.reply },
+			);
+			this.appendMagicReplyCard(result.heard, result.reply, bounds);
+			if (this.magicStatusEl) {
+				this.magicStatusEl.textContent = t('✦ Your turn — write the next line below');
+			}
+		} catch (error) {
+			console.warn('[bimo] magic diary turn failed', error);
+			for (const id of targetIds) this.magicReadingStrokeIds.delete(id);
+			this.renderStrokes();
+			if (this.magicStatusEl) {
+				this.magicStatusEl.textContent = t('The ink faded before reaching the spirit — check AI settings');
+			}
+		}
+	}
+
+	private appendMagicReplyCard(
+		heard: string,
+		reply: string,
+		bounds: { minX: number; minY: number; maxX: number; maxY: number },
+	): void {
+		const container = this.magicRepliesContainer;
+		if (!container) return;
+
+		const { width: canvasWidth } = this.computeCanvasDimensions();
+		const top = Math.max(Math.round(bounds.maxY + 20), this.magicMaxReplyBottomY + 16, 54);
+		const left = Math.max(24, Math.min(Math.round(bounds.minX), Math.max(24, canvasWidth - 380)));
+
+		const card = document.createElement('div');
+		card.className = 'bimo-magic-diary-reply';
+		card.style.left = `${left}px`;
+		card.style.top = `${top}px`;
+		card.addEventListener('pointerdown', (e) => e.stopPropagation());
+		card.addEventListener('click', (e) => e.stopPropagation());
+
+		if (heard) {
+			const heardEl = document.createElement('div');
+			heardEl.className = 'bimo-magic-diary-reply__heard';
+			heardEl.textContent = `“${heard}”`;
+			card.appendChild(heardEl);
+		}
+
+		const bodyEl = document.createElement('div');
+		bodyEl.className = 'bimo-magic-diary-reply__body';
+		card.appendChild(bodyEl);
+
+		const footerEl = document.createElement('div');
+		footerEl.className = 'bimo-magic-diary-reply__footer';
+
+		const insertBtn = document.createElement('button');
+		insertBtn.type = 'button';
+		insertBtn.className = 'bimo-magic-diary-reply__action';
+		insertBtn.textContent = t('Inscribe into note');
+		insertBtn.title = t('Append this exchange as Markdown text into the note');
+		insertBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const doc = this.view.state.doc;
+			const prefix = doc.length > 0 ? '\n\n' : '';
+			const block = heard
+				? `${prefix}> 🖋️ ${heard}\n>\n> ✦ *${reply}*`
+				: `${prefix}> ✦ *${reply}*`;
+			this.view.dispatch({
+				changes: { from: doc.length, insert: block },
+			});
+			new Notice(t('Exchange inscribed into the note.'));
+		});
+
+		const dismissBtn = document.createElement('button');
+		dismissBtn.type = 'button';
+		dismissBtn.className = 'bimo-magic-diary-reply__action bimo-magic-diary-reply__action--dismiss';
+		dismissBtn.textContent = '×';
+		dismissBtn.title = t('Fade this reply');
+		dismissBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			card.remove();
+		});
+
+		footerEl.append(insertBtn, dismissBtn);
+		card.appendChild(footerEl);
+		container.appendChild(card);
+
+		this.magicMaxReplyBottomY = Math.max(this.magicMaxReplyBottomY, top + 120);
+		this.syncLayerSize();
+		this.renderPaper();
+
+		// Typewriter / ink-bleed calligraphic reveal
+		const chars = Array.from(reply);
+		let idx = 0;
+		const stepMs = Math.max(12, Math.min(32, Math.floor(900 / Math.max(chars.length, 1))));
+		const tick = () => {
+			if (this.destroyed || !card.isConnected) return;
+			idx = Math.min(chars.length, idx + 1);
+			bodyEl.textContent = chars.slice(0, idx).join('');
+			if (idx < chars.length) {
+				window.setTimeout(tick, stepMs);
+			}
+		};
+		tick();
+	}
+
+	clearMagicReplies(): void {
+		this.magicRepliesContainer?.replaceChildren();
+		this.magicHistory = [];
+		this.magicMaxReplyBottomY = 0;
+		if (this.magicStatusEl) {
+			this.magicStatusEl.textContent = t('Magic Diary Page · Write a line and pause; the page will answer');
+		}
+		this.render();
+	}
+
 	private emitChange(): void {
 		this.doc.updatedAt = Date.now();
+		this.syncUndoRedoButtons();
 		this.options.onChange?.(this.doc);
 	}
 }

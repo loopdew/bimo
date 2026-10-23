@@ -52,7 +52,16 @@ module.exports = {
     open() {}
     close() {}
   },
-  TFile: class {},
+  TFile: class {
+    constructor() {
+      this.vault = {
+        read: async () => '',
+        cachedRead: async () => '',
+        on: () => ({}),
+        offref: () => {},
+      };
+    }
+  },
   Vault: class {},
   // The settings tab extends this at module scope, so a missing mock turns any
   // test that transitively imports the tab into "Class extends value undefined"

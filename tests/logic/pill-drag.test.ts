@@ -240,4 +240,34 @@ describe('pill drag', () => {
 		expect(left(h)).toBe(616);
 		expect(top(h)).toBe(308);
 	});
+
+	it('hides fixed pill when host has zero dimensions (background tab) and restores position when shown', () => {
+		const h = mount('fixed');
+		fire(h.pill, 'pointerdown', 400, 100);
+		fire(window, 'pointermove', 300, 80);
+		fire(window, 'pointerup', 300, 80);
+		const draggedLeft = left(h);
+		expect(h.pill.classList.contains('is-host-hidden')).toBe(false);
+
+		// Simulate background tab (zero-sized bounding rect)
+		h.host.getBoundingClientRect = () => rect(0, 0, 0, 0);
+		h.handle.reclamp();
+		expect(h.pill.classList.contains('is-host-hidden')).toBe(true);
+		expect(left(h)).toBe(draggedLeft);
+
+		// Simulate tab becoming active again
+		h.host.getBoundingClientRect = () => rect(HOST.left, HOST.top, HOST.width, HOST.height);
+		h.handle.reclamp();
+		expect(h.pill.classList.contains('is-host-hidden')).toBe(false);
+		expect(left(h)).toBe(draggedLeft);
+	});
+
+	it('does not start a drag from inside a style popover', () => {
+		const h = mount();
+		const popover = document.createElement('div');
+		popover.className = 'bimo-md-ink-popover';
+		h.pill.appendChild(popover);
+		fire(popover, 'pointerdown', 400, 100);
+		expect(h.pill.classList.contains('is-dragging')).toBe(false);
+	});
 });

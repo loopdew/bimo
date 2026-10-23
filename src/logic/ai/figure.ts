@@ -105,6 +105,41 @@ export function parseFigureSpec(raw: string): FigureSpec | null {
 	return null;
 }
 
+/**
+ * Parses a direct mathematical expression entered by the user (e.g.
+ * `y = sin(x)/x, -10 to 10`, `f(x) = x^2 - 4 [-5, 5]`, or `cos(x)`) without
+ * requiring an AI round-trip. Returns `null` when the input is natural language.
+ */
+export function parseDirectFigureSpec(raw: string): FigureSpec | null {
+	const text = (raw ?? '').trim();
+	if (!text || /[\r\n]/.test(text)) return null;
+
+	let exprCandidate = text;
+	let domain: [number, number] = [-10, 10];
+
+	const rangeSuffix = /^(.*?)(?:,\s*|\s+in\s+|\s+on\s+)\[?\s*(-?\d+(?:\.\d+)?)\s*(?:to|\.\.|~|,|到)\s*(-?\d+(?:\.\d+)?)\s*\]?\s*$/i.exec(exprCandidate)
+		?? /^(.*?)\s*\[\s*(-?\d+(?:\.\d+)?)\s*(?:to|\.\.|~|,|到)\s*(-?\d+(?:\.\d+)?)\s*\]\s*$/i.exec(exprCandidate);
+
+	if (rangeSuffix) {
+		const parsedDomain = normaliseDomain([rangeSuffix[2], rangeSuffix[3]]);
+		if (!parsedDomain) return null;
+		exprCandidate = rangeSuffix[1].trim();
+		domain = parsedDomain;
+	}
+
+	const cleanExpr = exprCandidate.replace(/^(?:y|f\s*\(\s*x\s*\))\s*=\s*/i, '').trim();
+	if (!cleanExpr) return null;
+
+	const sanitized = sanitizeExpression(cleanExpr);
+	if (!sanitized.ok) return null;
+
+	return {
+		expression: sanitized.expression,
+		domain,
+		title: `y = ${cleanExpr}`,
+	};
+}
+
 /** Asks the model to translate a request into a plot plan. */
 export async function requestFigureSpec(
 	settings: CustomTranscriptionProviderSettings,

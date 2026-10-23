@@ -653,6 +653,7 @@ export const ZH_CN: Record<string, string> = {
 	'The clipboard does not hold bimo ink.': '剪贴板里不是 bimo 笔迹。',
 	'Export this note’s ink as SVG': '把这篇笔记的笔迹导出为 SVG',
 	'笔墨 exported to {path}': '笔迹已导出到 {path}',
+	'Transcribe ink on this note': '识别这篇笔记上的笔迹',
 	'Cut selected ink': '剪切选中的笔迹',
 	'笔墨 cut.': '笔迹已剪切。',
 	'Check note ink status': '检查笔记书写状态',
@@ -689,4 +690,34 @@ export const ZH_CN: Record<string, string> = {
 		'手写识别走你自己的 API（Chat Completions 或 Responses 两种格式）。',
 	'Handwriting transcription runs on your own endpoint — the plugin ships no backend. Works with OpenAI, Azure OpenAI, DeepSeek, SiliconFlow, Gemini, Moonshot, Ollama, vLLM, LM Studio, one-api / new-api gateways, and anything else that speaks one of the two formats below.':
 		'手写识别运行在你自己的端点上——插件不附带任何后端服务。支持 OpenAI、Azure OpenAI、DeepSeek、硅基流动、Gemini、月之暗面、Ollama、vLLM、LM Studio、one-api / new-api 中转，以及任何支持下列两种格式之一的服务。',
+
+	// ── 选区操作栏与魔法书页（你写一句，AI写一句） ────────────
+	'Apply brush colour': '应用当前笔刷颜色',
+	'Duplicate selected ink': '复制并偏移选中的笔迹（副本）',
+	'Transcribe selected ink': 'AI 识别选中的笔迹',
+	'Finger drawing': '手指书写',
+	'Toggle whether a finger draws or scrolls': '切换单指是直接书写还是滚动页面',
+	'Toggle Magic Diary Page (you write a line, AI writes a line)':
+		'开启/关闭魔法书页（你写一句，AI写一句）',
+	'Create new Magic Diary Page': '新建魔法书页（你写一句，AI写一句）',
+	'✦ Magic Diary Page created — write a line with your pen and pause!':
+		'✦ 魔法书页已展开——用笔写下一句话并停笔，书页便会浮现回应！',
+	'Magic Diary Page · Write a line and pause; the page will answer':
+		'魔法书页 · 写下一句话，停笔即应',
+	'Reply now': '立即回应',
+	'Ask the Magic Diary Page to respond immediately': '让魔法书页立即回应当前笔迹',
+	'Clear whispers': '抹去低语',
+	'Fade away all diary replies on this page': '淡出并清除本页所有魔法回应',
+	'Listening to your handwriting…': '正在倾听你的笔迹…',
+	'✦ Magic Diary Page awakened — write a line and pause; the page will answer.':
+		'✦ 魔法书页已唤醒——写下一句话并停笔片刻，书页便会浮现回应。',
+	'Magic Diary Page closed.': '魔法书页已合上。',
+	'The page is absorbing your ink…': '书页正在汲取墨迹并浮现回应…',
+	'✦ Your turn — write the next line below': '✦ 轮到你了——在下方继续书写下一句',
+	'The ink faded before reaching the spirit — check AI settings':
+		'墨迹未能触达灵识——请检查设置中的 AI 接口与密钥',
+	'Inscribe into note': '铭刻入正文',
+	'Append this exchange as Markdown text into the note': '将这段对话以 Markdown 正文追加到笔记中',
+	'Exchange inscribed into the note.': '对话已铭刻入笔记正文。',
+	'Fade this reply': '隐去这条回应',
 };
