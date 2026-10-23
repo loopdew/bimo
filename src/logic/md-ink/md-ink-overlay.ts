@@ -151,6 +151,19 @@ function newStrokeId(): string {
 	return `md_${Date.now().toString(36)}_${strokeCounter}`;
 }
 
+function applyIcon(el: HTMLElement, name: string, fallback?: string): void {
+	try {
+		setIcon(el, name);
+		if (!el.firstElementChild && fallback) {
+			setIcon(el, fallback);
+		}
+	} catch {
+		if (fallback) {
+			try { setIcon(el, fallback); } catch {}
+		}
+	}
+}
+
 export class MdInkOverlay {
 	private readonly view: EditorView;
 	private readonly notePath: string;
@@ -477,19 +490,19 @@ export class MdInkOverlay {
 		this.pill = document.createElement('div');
 		this.pill.className = 'bimo-md-ink-pill';
 
-		const toolButtons: Array<{ tool: MdInkTool; icon: string; label: string }> = [
-			{ tool: 'pen', icon: 'pencil', label: t('Pen') },
-			{ tool: 'highlighter', icon: 'highlighter', label: t('Highlighter') },
+		const toolButtons: Array<{ tool: MdInkTool; icon: string; fallback?: string; label: string }> = [
+			{ tool: 'pen', icon: 'pencil', fallback: 'pen', label: t('Pen') },
+			{ tool: 'highlighter', icon: 'highlighter', fallback: 'brush', label: t('Highlighter') },
 			{ tool: 'eraser', icon: 'eraser', label: t('Eraser') },
-			{ tool: 'lasso', icon: 'lasso', label: t('Lasso') },
-			{ tool: 'pan', icon: 'hand', label: t('Pan') },
+			{ tool: 'lasso', icon: 'lasso', fallback: 'lasso-select', label: t('Lasso') },
+			{ tool: 'pan', icon: 'hand', fallback: 'grab', label: t('Pan') },
 		];
 
-		for (const { tool, icon, label } of toolButtons) {
+		for (const { tool, icon, fallback, label } of toolButtons) {
 			const button = document.createElement('button');
 			button.type = 'button';
 			button.title = label;
-			setIcon(button, icon);
+			applyIcon(button, icon, fallback);
 			button.dataset.mdInkTool = tool;
 			button.addEventListener('pointerdown', (event) => {
 				// The pill sits above the scroller; without this the editor steals
@@ -547,7 +560,7 @@ export class MdInkOverlay {
 		magicBtn.type = 'button';
 		magicBtn.className = 'bimo-md-ink-pill__magic-btn';
 		magicBtn.dataset.mdInkAction = 'magic-diary';
-		setIcon(magicBtn, 'sparkles');
+		applyIcon(magicBtn, 'sparkles', 'wand-2');
 		magicBtn.title = t('Toggle Magic Diary Page (you write a line, AI writes a line)');
 		magicBtn.addEventListener('pointerdown', (event) => event.stopPropagation());
 		magicBtn.addEventListener('click', (event) => {
@@ -566,7 +579,7 @@ export class MdInkOverlay {
 		const undo = document.createElement('button');
 		undo.type = 'button';
 		undo.dataset.mdInkAction = 'undo';
-		setIcon(undo, 'undo-2');
+		applyIcon(undo, 'undo', 'undo-2');
 		undo.title = t('Undo ink stroke');
 		undo.addEventListener('pointerdown', (event) => event.stopPropagation());
 		undo.addEventListener('click', (event) => {
@@ -580,7 +593,7 @@ export class MdInkOverlay {
 		const redo = document.createElement('button');
 		redo.type = 'button';
 		redo.dataset.mdInkAction = 'redo';
-		setIcon(redo, 'redo-2');
+		applyIcon(redo, 'redo', 'redo-2');
 		redo.title = t('Redo ink stroke');
 		redo.addEventListener('pointerdown', (event) => event.stopPropagation());
 		redo.addEventListener('click', (event) => {
@@ -594,7 +607,7 @@ export class MdInkOverlay {
 		const clear = document.createElement('button');
 		clear.type = 'button';
 		clear.dataset.mdInkAction = 'clear';
-		setIcon(clear, 'trash-2');
+		applyIcon(clear, 'trash', 'trash-2');
 		clear.title = t('Clear all ink on this note');
 		clear.addEventListener('pointerdown', (event) => event.stopPropagation());
 		clear.addEventListener('click', (event) => {

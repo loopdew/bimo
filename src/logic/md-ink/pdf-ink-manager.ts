@@ -64,6 +64,19 @@ interface AttachedPdf {
 	host: HTMLElement | null;
 }
 
+function applyIcon(el: HTMLElement, name: string, fallback?: string): void {
+	try {
+		setIcon(el, name);
+		if (!el.firstElementChild && fallback) {
+			setIcon(el, fallback);
+		}
+	} catch {
+		if (fallback) {
+			try { setIcon(el, fallback); } catch {}
+		}
+	}
+}
+
 /**
  * A tool pill for PDF views.
  *
@@ -88,23 +101,23 @@ function createPdfPill(
 	const pill = document.createElement('div');
 	pill.className = 'bimo-md-ink-pill bimo-md-ink-pill--pdf';
 
-	const tools: Array<{ tool: string; icon: string; label: string }> = [
-		{ tool: 'pen', icon: 'pencil', label: t('Pen') },
-		{ tool: 'highlighter', icon: 'highlighter', label: t('Highlighter') },
+	const tools: Array<{ tool: string; icon: string; fallback?: string; label: string }> = [
+		{ tool: 'pen', icon: 'pencil', fallback: 'pen', label: t('Pen') },
+		{ tool: 'highlighter', icon: 'highlighter', fallback: 'brush', label: t('Highlighter') },
 		{ tool: 'eraser', icon: 'eraser', label: t('Eraser') },
-		{ tool: 'lasso', icon: 'lasso', label: t('Lasso') },
-		{ tool: 'pan', icon: 'hand', label: t('Pan') },
+		{ tool: 'lasso', icon: 'lasso', fallback: 'lasso-select', label: t('Lasso') },
+		{ tool: 'pan', icon: 'hand', fallback: 'grab', label: t('Pan') },
 	];
 
 	let stylePopover: PillStylePopoverHandle | null = null;
 
-	for (const { tool, icon, label } of tools) {
+	for (const { tool, icon, fallback, label } of tools) {
 		const button = document.createElement('button');
 		button.type = 'button';
 		button.title = label;
 		button.dataset.mdInkTool = tool;
 		button.classList.toggle('is-active', getTool() === tool);
-		setIcon(button, icon);
+		applyIcon(button, icon, fallback);
 		button.addEventListener('pointerdown', (event) => event.stopPropagation());
 		button.addEventListener('click', (event) => {
 			event.preventDefault();
@@ -139,7 +152,7 @@ function createPdfPill(
 	undo.type = 'button';
 	undo.dataset.mdInkAction = 'undo';
 	undo.title = t('Undo ink stroke');
-	setIcon(undo, 'undo-2');
+	applyIcon(undo, 'undo', 'undo-2');
 	undo.addEventListener('pointerdown', (event) => event.stopPropagation());
 	undo.addEventListener('click', (event) => {
 		event.preventDefault();
@@ -153,7 +166,7 @@ function createPdfPill(
 	redo.type = 'button';
 	redo.dataset.mdInkAction = 'redo';
 	redo.title = t('Redo ink stroke');
-	setIcon(redo, 'redo-2');
+	applyIcon(redo, 'redo', 'redo-2');
 	redo.addEventListener('pointerdown', (event) => event.stopPropagation());
 	redo.addEventListener('click', (event) => {
 		event.preventDefault();
@@ -167,7 +180,7 @@ function createPdfPill(
 	clear.type = 'button';
 	clear.dataset.mdInkAction = 'clear';
 	clear.title = t('Clear all ink on open PDFs');
-	setIcon(clear, 'trash-2');
+	applyIcon(clear, 'trash', 'trash-2');
 	clear.addEventListener('pointerdown', (event) => event.stopPropagation());
 	clear.addEventListener('click', (event) => {
 		event.preventDefault();

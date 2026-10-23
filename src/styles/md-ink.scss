@@ -157,21 +157,21 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	z-index: 40;
 	display: flex;
 	align-items: center;
-	gap: 2px;
-	padding: 3px 5px;
+	gap: 3px;
+	padding: 4px 6px;
 	border-radius: 999px;
-	background: var(--background-secondary);
+	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
-	box-shadow: var(--shadow-s);
-	/* Discoverable at a glance. 0.3 read as "not there" for a first-time user
-	   and buried the only control that turns the feature on. */
-	opacity: 0.7;
-	transition: opacity 120ms ease;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+	opacity: 0.95;
+	transition: opacity 120ms ease, box-shadow 120ms ease;
 	/* The pill body is a drag handle; its buttons keep their own cursor. */
 	cursor: grab;
 	touch-action: none;
 	/* Dragging must never select the note text underneath. */
 	user-select: none;
+	--icon-size: 16px;
+	--icon-stroke: 2px;
 }
 
 .bimo-md-ink-pill.is-dragging {
@@ -192,6 +192,7 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 .bimo-md-ink-pill:focus-within,
 .bimo-md-ink-pill.is-live {
 	opacity: 1;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18), 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .bimo-md-ink-pill button {
@@ -199,18 +200,18 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	width: 1.9em;
-	height: 1.9em;
-	min-width: 1.9em;
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
 	padding: 0;
 	border: none;
 	border-radius: 999px;
 	background: transparent;
 	box-shadow: none;
-	color: var(--text-muted);
-	font-size: var(--font-ui-small);
-	line-height: 1;
+	color: var(--text-normal);
 	cursor: pointer;
+	transition: background 0.12s ease, color 0.12s ease;
 }
 
 .bimo-md-ink-pill button:hover {
@@ -219,15 +220,41 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 }
 
 .bimo-md-ink-pill button.is-active {
-	background: var(--interactive-accent);
-	color: var(--text-on-accent);
+	background: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
 }
 
 .bimo-md-ink-pill button.is-disabled,
 .bimo-md-ink-pill button:disabled {
-	opacity: 0.35;
+	opacity: 0.35 !important;
 	cursor: default;
 	pointer-events: none;
+}
+
+/* 保证药丸工具栏与选区栏中的所有 SVG 图标在任何主题下均清晰显现 */
+.bimo-md-ink-pill button svg,
+.bimo-md-ink-pill button .svg-icon,
+.bimo-md-ink-selection-bar button svg,
+.bimo-md-ink-selection-bar button .svg-icon,
+.bimo-md-ink-selection-bar__btn svg,
+.bimo-md-ink-selection-bar__btn .svg-icon,
+.bimo-md-ink-pill__style-btn svg,
+.bimo-md-ink-pill__style-btn .svg-icon,
+.bimo-md-ink-pill__magic-btn svg,
+.bimo-md-ink-pill__magic-btn .svg-icon {
+	width: 16px !important;
+	height: 16px !important;
+	min-width: 16px !important;
+	min-height: 16px !important;
+	max-width: 16px !important;
+	max-height: 16px !important;
+	display: block !important;
+	stroke: currentColor !important;
+	stroke-width: 2px !important;
+	fill: none !important;
+	opacity: 1 !important;
+	visibility: visible !important;
+	overflow: visible !important;
 }
 
 /*
