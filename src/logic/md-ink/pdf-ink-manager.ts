@@ -92,6 +92,7 @@ function createPdfPill(
 		brush: import('src/ink-canvas/brush-presets').InkBrushKind;
 		colour: string;
 		size: number;
+		eraserMode?: 'stroke' | 'pixel';
 		fingerDraws?: boolean;
 	},
 	onStyleChange: (patch: PillStylePatch) => void,
@@ -100,6 +101,18 @@ function createPdfPill(
 ): { pill: HTMLElement; drag: PillDragHandle; stylePopover: PillStylePopoverHandle; syncPill: () => void } {
 	const pill = document.createElement('div');
 	pill.className = 'bimo-md-ink-pill bimo-md-ink-pill--pdf';
+
+	let dragHandleRef: PillDragHandle | null = null;
+	const dragHandle = document.createElement('div');
+	dragHandle.className = 'bimo-md-ink-pill__drag-handle';
+	dragHandle.setAttribute('title', t('Drag toolbar (double-click to switch preset position)'));
+	applyIcon(dragHandle, 'grip-vertical', 'more-vertical');
+	dragHandle.addEventListener('dblclick', (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		dragHandleRef?.cyclePreset?.();
+	});
+	pill.appendChild(dragHandle);
 
 	const tools: Array<{ tool: string; icon: string; fallback?: string; label: string }> = [
 		{ tool: 'pen', icon: 'pencil', fallback: 'pen', label: t('Pen') },
@@ -123,6 +136,16 @@ function createPdfPill(
 			event.preventDefault();
 			event.stopPropagation();
 			stylePopover?.close();
+
+			if (tool === 'eraser' && getTool() === 'eraser') {
+				const currentMode = getStyleState().eraserMode ?? 'stroke';
+				const nextMode = currentMode === 'stroke' ? 'pixel' : 'stroke';
+				onStyleChange({ eraserMode: nextMode });
+				new Notice(nextMode === 'stroke' ? t('Object eraser') : t('Partial eraser'), 1200);
+				syncPill();
+				return;
+			}
+
 			onSelect(tool);
 			syncPill();
 		});
@@ -199,6 +222,16 @@ function createPdfPill(
 		const styleState = getStyleState();
 		const colour = styleState.colour === 'currentColor' ? 'var(--text-normal)' : styleState.colour;
 		pill.style.setProperty('--bimo-md-ink-colour', colour);
+
+		const eraserBtn = pill.querySelector<HTMLButtonElement>('button[data-md-ink-tool="eraser"]');
+		if (eraserBtn) {
+			const isPixel = styleState.eraserMode === 'pixel';
+			eraserBtn.dataset.mdInkEraserMode = isPixel ? 'pixel' : 'stroke';
+			eraserBtn.title = isPixel
+				? `${t('Eraser')} (${t('Partial eraser')} · ${t('Click to switch to object eraser')})`
+				: `${t('Eraser')} (${t('Object eraser')} · ${t('Click to switch to partial eraser')})`;
+		}
+
 		const canUndo = overlay.canUndo();
 		undo.disabled = !canUndo;
 		undo.classList.toggle('is-disabled', !canUndo);
@@ -222,6 +255,7 @@ function createPdfPill(
 			top: 52,
 		}),
 	});
+	dragHandleRef = drag;
 	return { pill, drag, stylePopover, syncPill };
 }
 

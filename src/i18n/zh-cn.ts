@@ -726,7 +726,10 @@ export const ZH_CN: Record<string, string> = {
 	'Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.':
 		'整笔擦除触碰笔画任意处即删除整笔；局部/像素擦除可在触碰点精准截断笔画。',
 	'Object eraser': '整笔擦除',
-	'Partial eraser': '局部/像素擦除',
+	'Partial eraser': '像素擦除',
+	'Click to switch to object eraser': '点击切换为整笔擦除',
+	'Click to switch to partial eraser': '点击切换为像素擦除',
+	'Drag toolbar (double-click to switch preset position)': '按住拖动工具栏（双击切换预设停靠位置）',
 	'You write a line, AI writes a line. Inspired by magical parchment and enchanted diaries. Choose from preset response styles or tailor your own system prompt.':
 		'你写一句，AI 回一句。灵感源于活点地图与魔法日记。可选用预设回复风格或完全自定义系统提示词。',
 	'Response style': '回复风格',

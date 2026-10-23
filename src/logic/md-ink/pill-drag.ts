@@ -53,6 +53,8 @@ export interface PillDragHandle {
 	reset(): void;
 	/** Re-clamp the current position after the window or host resized. */
 	reclamp(): void;
+	/** Cycle through preset dock positions (top-right, bottom-center, left, right, top-center). */
+	cyclePreset?(): void;
 }
 
 /** A press that never moves further than this is a click, not a drag. */
@@ -292,7 +294,8 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 	function onPointerDown(event: PointerEvent): void {
 		if (event.button !== 0) return;
 		const target = event.target as HTMLElement | null;
-		if (target?.closest(INTERACTIVE_SELECTOR)) return;
+		// Dedicated drag handle always allows dragging; other buttons do not start a drag
+		if (!target?.closest('.bimo-md-ink-pill__drag-handle') && target?.closest(INTERACTIVE_SELECTOR)) return;
 
 		event.preventDefault();
 		event.stopPropagation();
@@ -320,11 +323,98 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 		window.addEventListener('blur', onWindowBlur);
 	}
 
+	const PRESETS = ['top-right', 'bottom-center', 'left', 'right', 'top-center'] as const;
+	type PresetName = typeof PRESETS[number];
+	let currentPresetIdx = 0;
+
+	function applyPreset(preset: PresetName): void {
+		const bounds = host.getBoundingClientRect();
+		const size = pillSize();
+		let target: PillPosition;
+
+		if (positioning === 'fixed') {
+			switch (preset) {
+				case 'bottom-center':
+					target = {
+						left: bounds.left + Math.max(0, (bounds.width - size.width) / 2),
+						top: Math.min(window.innerHeight - size.height - 16, bounds.bottom - size.height - 16),
+					};
+					break;
+				case 'top-center':
+					target = {
+						left: bounds.left + Math.max(0, (bounds.width - size.width) / 2),
+						top: bounds.top + 8,
+					};
+					break;
+				case 'left':
+					target = {
+						left: bounds.left + 12,
+						top: bounds.top + 48,
+					};
+					break;
+				case 'right':
+					target = {
+						left: bounds.right - size.width - 12,
+						top: bounds.top + 48,
+					};
+					break;
+				case 'top-right':
+				default:
+					target = defaultPosition({ host: bounds, pill: size });
+					break;
+			}
+		} else {
+			switch (preset) {
+				case 'bottom-center':
+					target = {
+						left: Math.max(0, (bounds.width - size.width) / 2),
+						top: bounds.height - size.height - 16,
+					};
+					break;
+				case 'top-center':
+					target = {
+						left: Math.max(0, (bounds.width - size.width) / 2),
+						top: 8,
+					};
+					break;
+				case 'left':
+					target = {
+						left: 12,
+						top: 48,
+					};
+					break;
+				case 'right':
+					target = {
+						left: bounds.width - size.width - 12,
+						top: 48,
+					};
+					break;
+				case 'top-right':
+				default:
+					target = defaultPosition({ host: bounds, pill: size });
+					break;
+			}
+		}
+
+		current = clampPosition(target, bounds);
+		writePosition(current);
+		store(current, bounds);
+	}
+
+	function cyclePreset(): void {
+		currentPresetIdx = (currentPresetIdx + 1) % PRESETS.length;
+		applyPreset(PRESETS[currentPresetIdx]);
+	}
+
 	function onDoubleClick(event: MouseEvent): void {
 		const target = event.target as HTMLElement | null;
-		if (target?.closest(INTERACTIVE_SELECTOR)) return;
+		if (!target?.closest('.bimo-md-ink-pill__drag-handle') && target?.closest(INTERACTIVE_SELECTOR)) return;
 		event.preventDefault();
 		event.stopPropagation();
+		if (target?.closest('.bimo-md-ink-pill__drag-handle')) {
+			cyclePreset();
+			return;
+		}
 		try {
 			window.localStorage.removeItem(storageKey);
 		} catch {
@@ -358,6 +448,9 @@ export function attachPillDrag(options: PillDragOptions): PillDragHandle {
 				/* Ignore. */
 			}
 			placeDefault();
+		},
+		cyclePreset(): void {
+			cyclePreset();
 		},
 		reclamp(): void {
 			if (disposed) return;

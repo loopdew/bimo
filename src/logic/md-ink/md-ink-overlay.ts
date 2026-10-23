@@ -222,6 +222,7 @@ export class MdInkOverlay {
 	private dragStart: { x: number; y: number } | null = null;
 	private dragOrigins = new Map<string, { x: number; y: number }>();
 	private panStart: { scrollTop: number; scrollLeft: number; clientY: number; clientX: number } | null = null;
+	private touchPan: { pointerId: number; startX: number; startY: number; startScrollLeft: number; startScrollTop: number } | null = null;
 
 	private renderQueued = false;
 	private destroyed = false;
@@ -491,6 +492,17 @@ export class MdInkOverlay {
 		this.pill = document.createElement('div');
 		this.pill.className = 'bimo-md-ink-pill';
 
+		const dragHandle = document.createElement('div');
+		dragHandle.className = 'bimo-md-ink-pill__drag-handle';
+		dragHandle.setAttribute('title', t('Drag toolbar (double-click to switch preset position)'));
+		applyIcon(dragHandle, 'grip-vertical', 'more-vertical');
+		dragHandle.addEventListener('dblclick', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.pillDrag?.cyclePreset?.();
+		});
+		this.pill.appendChild(dragHandle);
+
 		const toolButtons: Array<{ tool: MdInkTool; icon: string; fallback?: string; label: string }> = [
 			{ tool: 'pen', icon: 'pencil', fallback: 'pen', label: t('Pen') },
 			{ tool: 'highlighter', icon: 'highlighter', fallback: 'brush', label: t('Highlighter') },
@@ -514,6 +526,18 @@ export class MdInkOverlay {
 				event.preventDefault();
 				event.stopPropagation();
 				this.stylePopover?.close();
+
+				if (tool === 'eraser' && this.getTool() === 'eraser') {
+					// Toggle between 'stroke' and 'pixel' mode directly from toolbar!
+					const nextMode = (this.options.eraserMode ?? 'stroke') === 'stroke' ? 'pixel' : 'stroke';
+					this.options.eraserMode = nextMode;
+					this.options.onStyleChange?.({ eraserMode: nextMode });
+					this.syncEraserButton(button);
+					this.stylePopover?.sync();
+					new Notice(nextMode === 'stroke' ? t('Object eraser') : t('Partial eraser'), 1200);
+					return;
+				}
+
 				this.options.onToolSelected?.(tool);
 				this.setTool(tool);
 			});
@@ -688,7 +712,18 @@ export class MdInkOverlay {
 		for (const button of Array.from(this.pill.querySelectorAll<HTMLButtonElement>('[data-md-ink-tool]'))) {
 			button.classList.toggle('is-active', button.dataset.mdInkTool === active);
 		}
+		this.syncEraserButton();
 		this.stylePopover?.sync();
+	}
+
+	private syncEraserButton(button?: HTMLButtonElement): void {
+		const btn = button ?? (this.pill?.querySelector<HTMLButtonElement>('button[data-md-ink-tool="eraser"]') ?? null);
+		if (!btn) return;
+		const isPixel = this.options.eraserMode === 'pixel';
+		btn.dataset.mdInkEraserMode = isPixel ? 'pixel' : 'stroke';
+		btn.title = isPixel
+			? `${t('Eraser')} (${t('Partial eraser')} · ${t('Click to switch to object eraser')})`
+			: `${t('Eraser')} (${t('Object eraser')} · ${t('Click to switch to partial eraser')})`;
 	}
 
 	private syncUndoRedoButtons(): void {
@@ -1297,10 +1332,25 @@ export class MdInkOverlay {
 			return;
 		}
 
-		// A finger is the scroll gesture unless the user opted into finger drawing.
-		// Returning without preventDefault lets the browser pan the note instead of
-		// leaving a line across it.
+		// Pure Writing & Palm Rejection:
+		// When finger drawing is off, fingers strictly pan the canvas instead of triggering
+		// text carets, selections, or keyboard popups in CodeMirror.
 		if (event.pointerType === 'touch' && !this.options.fingerDraws && this.getTool() !== 'lasso') {
+			event.preventDefault();
+			event.stopPropagation();
+			// If already drawing with stylus, drop palm contact completely
+			if (this.activePointerId !== null) {
+				return;
+			}
+			const scroller = this.scrollerEl;
+			this.touchPan = {
+				pointerId: event.pointerId,
+				startX: event.clientX,
+				startY: event.clientY,
+				startScrollLeft: scroller.scrollLeft,
+				startScrollTop: scroller.scrollTop,
+			};
+			this.layer.setPointerCapture?.(event.pointerId);
 			return;
 		}
 
@@ -1455,6 +1505,17 @@ export class MdInkOverlay {
 	}
 
 	private onPointerMove(event: PointerEvent): void {
+		if (this.touchPan && event.pointerId === this.touchPan.pointerId) {
+			event.preventDefault();
+			event.stopPropagation();
+			const scroller = this.scrollerEl;
+			const dx = event.clientX - this.touchPan.startX;
+			const dy = event.clientY - this.touchPan.startY;
+			scroller.scrollLeft = this.touchPan.startScrollLeft - dx;
+			scroller.scrollTop = this.touchPan.startScrollTop - dy;
+			return;
+		}
+
 		this.updateReticle(event.clientX, event.clientY);
 
 		const tool = this.getTool();
@@ -1534,6 +1595,14 @@ export class MdInkOverlay {
 	}
 
 	private onPointerUp(event: PointerEvent): void {
+		if (this.touchPan && event.pointerId === this.touchPan.pointerId) {
+			event.preventDefault();
+			event.stopPropagation();
+			try { this.layer.releasePointerCapture?.(event.pointerId); } catch {}
+			this.touchPan = null;
+			return;
+		}
+
 		this.clearHoldSnapTimer();
 		if (event.pointerId !== this.activePointerId) {
 			if (this.lassoStart) this.finishLasso();
@@ -1589,6 +1658,11 @@ export class MdInkOverlay {
 	}
 
 	private onPointerCancel(event: PointerEvent): void {
+		if (this.touchPan && event.pointerId === this.touchPan.pointerId) {
+			try { this.layer.releasePointerCapture?.(event.pointerId); } catch {}
+			this.touchPan = null;
+			return;
+		}
 		if (event.pointerId !== this.activePointerId) return;
 		this.abortActiveStroke();
 	}
@@ -1600,6 +1674,7 @@ export class MdInkOverlay {
 	 * frames of an accidental touch must not survive the zoom.
 	 */
 	private abortActiveStroke(): void {
+		this.touchPan = null;
 		this.clearHoldSnapTimer();
 		if (this.activePointerId !== null) {
 			this.layer.releasePointerCapture?.(this.activePointerId);
