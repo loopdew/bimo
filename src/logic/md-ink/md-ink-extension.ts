@@ -225,6 +225,7 @@ export function createMdInkExtension(plugin: MyPlugin): Extension {
 						eraserMode: plugin.settings.mdInkEraserMode,
 						eraserRadius: plugin.settings.mdInkEraserRadius,
 						shapeSnap: plugin.settings.mdInkShapeSnap,
+						magicIdleMs: plugin.settings.magicInkIdleMs,
 						magicPreset: plugin.settings.magicDiaryPreset,
 						magicCustomPrompt: plugin.settings.magicDiaryCustomPrompt,
 						onMagicPresetChange: (preset) => {

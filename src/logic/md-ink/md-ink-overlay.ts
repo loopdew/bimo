@@ -103,6 +103,8 @@ export interface MdInkOverlayOptions {
 	eraserRadius: number;
 	/** Straighten lines and close rectangles when the stroke clearly meant one. */
 	shapeSnap: boolean;
+	/** Idle delay (ms) before handwriting pauses are read by AI (when auto-respond is active). */
+	magicIdleMs?: number;
 	/** Magic diary preset mode. */
 	magicPreset?: MagicDiaryPreset;
 	/** Custom prompt for magic diary. */
@@ -179,8 +181,10 @@ export class MdInkOverlay {
 	private selectionBar: HTMLDivElement | null = null;
 	private magicBannerEl: HTMLDivElement | null = null;
 	private magicStatusEl: HTMLSpanElement | null = null;
+	private magicAutoToggleBtn: HTMLButtonElement | null = null;
 	private magicRepliesContainer: HTMLDivElement | null = null;
 	private magicDiaryMode = false;
+	private magicAutoRespond = false;
 	private magicAutoChecked = false;
 	private magicPendingStrokeIds = new Set<string>();
 	private magicReadingStrokeIds = new Set<string>();
@@ -190,8 +194,11 @@ export class MdInkOverlay {
 	private previousPaperBeforeMagic: MdInkPaper | null = null;
 	private activeEraseSession: { removed: MdInkStroke[]; added: MdInkStroke[] } | null = null;
 	private component = new Component();
+	private readonly patternUid = Math.random().toString(36).slice(2, 8);
 	private svg!: SVGSVGElement;
+	private defs!: SVGDefsElement;
 	private paperGroup!: SVGGElement;
+	private paperRect: SVGRectElement | null = null;
 	private strokeGroup!: SVGGElement;
 	private readonly pathElements = new Map<string, SVGPathElement>();
 	private livePath!: SVGPathElement;
@@ -271,8 +278,16 @@ export class MdInkOverlay {
 		this.svg.setAttribute('class', 'bimo-md-ink-svg');
 		this.svg.style.overflow = 'visible';
 
+		this.defs = document.createElementNS(SVG_NS, 'defs');
+		this.buildPaperPatterns(this.defs);
+		this.svg.appendChild(this.defs);
+
 		this.paperGroup = document.createElementNS(SVG_NS, 'g');
 		this.paperGroup.setAttribute('class', 'bimo-md-ink-paper');
+
+		this.paperRect = document.createElementNS(SVG_NS, 'rect');
+		this.paperRect.style.display = 'none';
+		this.paperGroup.appendChild(this.paperRect);
 
 		this.strokeGroup = document.createElementNS(SVG_NS, 'g');
 		this.strokeGroup.setAttribute('class', 'bimo-md-ink-strokes');
@@ -423,11 +438,31 @@ export class MdInkOverlay {
 		status.textContent = t('Magic Diary Page · Write a line and pause; the page will answer');
 		this.magicStatusEl = status;
 
+		const autoToggleBtn = document.createElement('button');
+		autoToggleBtn.type = 'button';
+		autoToggleBtn.className = 'bimo-magic-diary-banner__btn bimo-magic-diary-banner__btn--auto';
+		autoToggleBtn.textContent = this.magicAutoRespond ? `⚡ ${t('Auto: On')}` : `⏸️ ${t('Auto: Off')}`;
+		autoToggleBtn.title = t('Toggle automatic reply on pause');
+		autoToggleBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.magicAutoRespond = !this.magicAutoRespond;
+			autoToggleBtn.textContent = this.magicAutoRespond ? `⚡ ${t('Auto: On')}` : `⏸️ ${t('Auto: Off')}`;
+			if (this.magicAutoRespond) {
+				new Notice(t('Automatic response enabled: pauses will be answered.'));
+				this.scheduleMagicDiaryTurn();
+			} else {
+				this.clearMagicPauseTimer();
+				new Notice(t('Manual mode: write freely, tap Reply now whenever ready.'));
+			}
+		});
+		this.magicAutoToggleBtn = autoToggleBtn;
+
 		const replyNowBtn = document.createElement('button');
 		replyNowBtn.type = 'button';
-		replyNowBtn.className = 'bimo-magic-diary-banner__btn';
+		replyNowBtn.className = 'bimo-magic-diary-banner__btn bimo-magic-diary-banner__btn--reply';
 		replyNowBtn.dataset.magicAction = 'reply-now';
-		replyNowBtn.textContent = t('Reply now');
+		replyNowBtn.textContent = `✦ ${t('Reply now')}`;
 		replyNowBtn.title = t('Ask the Magic Diary Page to respond immediately');
 		replyNowBtn.addEventListener('click', (e) => {
 			e.preventDefault();
@@ -470,7 +505,7 @@ export class MdInkOverlay {
 			this.options.onMagicPresetChange?.(val);
 		});
 
-		banner.append(crest, status, modeSelect, replyNowBtn, clearRepliesBtn);
+		banner.append(crest, status, modeSelect, autoToggleBtn, replyNowBtn, clearRepliesBtn);
 		this.magicBannerEl = banner;
 		this.layer.appendChild(banner);
 
@@ -1168,50 +1203,66 @@ export class MdInkOverlay {
 		}
 	}
 
+	private buildPaperPatterns(defs: SVGDefsElement): void {
+		const uid = this.patternUid;
+
+		// 1. Ruled pattern (horizontal lines every 24px)
+		const ruled = document.createElementNS(SVG_NS, 'pattern');
+		ruled.id = `bimo-paper-ruled-${uid}`;
+		ruled.setAttribute('width', '100');
+		ruled.setAttribute('height', '24');
+		ruled.setAttribute('patternUnits', 'userSpaceOnUse');
+		const line = document.createElementNS(SVG_NS, 'line');
+		line.setAttribute('x1', '0');
+		line.setAttribute('y1', '24');
+		line.setAttribute('x2', '100');
+		line.setAttribute('y2', '24');
+		line.setAttribute('class', 'bimo-md-ink-paper-line');
+		ruled.appendChild(line);
+		defs.appendChild(ruled);
+
+		// 2. Grid pattern (24px x 24px boxes)
+		const grid = document.createElementNS(SVG_NS, 'pattern');
+		grid.id = `bimo-paper-grid-${uid}`;
+		grid.setAttribute('width', '24');
+		grid.setAttribute('height', '24');
+		grid.setAttribute('patternUnits', 'userSpaceOnUse');
+		const gridPath = document.createElementNS(SVG_NS, 'path');
+		gridPath.setAttribute('d', 'M 24 0 L 0 0 0 24');
+		gridPath.setAttribute('fill', 'none');
+		gridPath.setAttribute('class', 'bimo-md-ink-paper-line');
+		grid.appendChild(gridPath);
+		defs.appendChild(grid);
+
+		// 3. Dots pattern (dot every 24px)
+		const dots = document.createElementNS(SVG_NS, 'pattern');
+		dots.id = `bimo-paper-dots-${uid}`;
+		dots.setAttribute('width', '24');
+		dots.setAttribute('height', '24');
+		dots.setAttribute('patternUnits', 'userSpaceOnUse');
+		const dot = document.createElementNS(SVG_NS, 'circle');
+		dot.setAttribute('cx', '12');
+		dot.setAttribute('cy', '12');
+		dot.setAttribute('r', '1');
+		dot.setAttribute('class', 'bimo-md-ink-paper-dot');
+		dots.appendChild(dot);
+		defs.appendChild(dots);
+	}
+
 	private renderPaper(): void {
-		this.paperGroup.replaceChildren();
 		const paper = this.options.paper;
-		if (paper === 'none') return;
+		if (paper === 'none' || !this.paperRect) {
+			if (this.paperRect) this.paperRect.style.display = 'none';
+			return;
+		}
 
 		const { width, height } = this.computeCanvasDimensions();
-		const spacing = 24;
-
-		const fragment = document.createDocumentFragment();
-		if (paper === 'ruled' || paper === 'grid') {
-			for (let y = spacing; y < height; y += spacing) {
-				const line = document.createElementNS(SVG_NS, 'line');
-				line.setAttribute('x1', '0');
-				line.setAttribute('x2', String(width));
-				line.setAttribute('y1', String(y));
-				line.setAttribute('y2', String(y));
-				line.setAttribute('class', 'bimo-md-ink-paper-line');
-				fragment.appendChild(line);
-			}
-		}
-		if (paper === 'grid') {
-			for (let x = spacing; x < width; x += spacing) {
-				const line = document.createElementNS(SVG_NS, 'line');
-				line.setAttribute('x1', String(x));
-				line.setAttribute('x2', String(x));
-				line.setAttribute('y1', '0');
-				line.setAttribute('y2', String(height));
-				line.setAttribute('class', 'bimo-md-ink-paper-line');
-				fragment.appendChild(line);
-			}
-		}
-		if (paper === 'dots') {
-			for (let y = spacing; y < height; y += spacing) {
-				for (let x = spacing; x < width; x += spacing) {
-					const dot = document.createElementNS(SVG_NS, 'circle');
-					dot.setAttribute('cx', String(x));
-					dot.setAttribute('cy', String(y));
-					dot.setAttribute('r', '1');
-					dot.setAttribute('class', 'bimo-md-ink-paper-dot');
-					fragment.appendChild(dot);
-				}
-			}
-		}
-		this.paperGroup.appendChild(fragment);
+		this.paperRect.style.display = '';
+		this.paperRect.setAttribute('x', '0');
+		this.paperRect.setAttribute('y', '0');
+		this.paperRect.setAttribute('width', String(width));
+		this.paperRect.setAttribute('height', String(height));
+		this.paperRect.setAttribute('fill', `url(#bimo-paper-${paper}-${this.patternUid})`);
 	}
 
 	///////////////////////////
@@ -1224,13 +1275,29 @@ export class MdInkOverlay {
 		const up = (event: PointerEvent) => this.onPointerUp(event);
 		const cancel = (event: PointerEvent) => this.onPointerCancel(event);
 
+		const touchFilter = (event: TouchEvent) => {
+			if (this.getTool() === 'pan') return;
+			const target = event.target as HTMLElement | null;
+			if (target?.closest('button, select, input, a, .bimo-md-ink-pill, .bimo-magic-diary-banner, .bimo-magic-diary-reply button')) {
+				return;
+			}
+			event.stopPropagation();
+			if (!this.options.fingerDraws) {
+				event.preventDefault();
+			}
+		};
+
 		this.layer.addEventListener('pointerdown', down);
+		this.layer.addEventListener('touchstart', touchFilter, { passive: false });
+		this.layer.addEventListener('touchmove', touchFilter, { passive: false });
 		window.addEventListener('pointermove', move);
 		window.addEventListener('pointerup', up);
 		window.addEventListener('pointercancel', cancel);
 
 		this.disposers.push(() => {
 			this.layer.removeEventListener('pointerdown', down);
+			this.layer.removeEventListener('touchstart', touchFilter);
+			this.layer.removeEventListener('touchmove', touchFilter);
 			window.removeEventListener('pointermove', move);
 			window.removeEventListener('pointerup', up);
 			window.removeEventListener('pointercancel', cancel);
@@ -2392,13 +2459,15 @@ export class MdInkOverlay {
 
 	private scheduleMagicDiaryTurn(): void {
 		this.clearMagicPauseTimer();
+		if (!this.magicAutoRespond) return;
 		if (this.magicStatusEl) {
 			this.magicStatusEl.textContent = t('Listening to your handwriting…');
 		}
+		const idleMs = Math.max(3000, this.options.magicIdleMs ?? 3500);
 		this.magicPauseTimer = setTimeout(() => {
 			this.magicPauseTimer = null;
 			void this.triggerMagicDiaryTurn(false);
-		}, MAGIC_DIARY_PAUSE_MS);
+		}, idleMs);
 	}
 
 	async triggerMagicDiaryTurn(manual = false): Promise<void> {
@@ -2477,22 +2546,55 @@ export class MdInkOverlay {
 		if (!container) return;
 
 		const { width: canvasWidth } = this.computeCanvasDimensions();
-		const top = Math.max(Math.round(bounds.maxY + 20), this.magicMaxReplyBottomY + 16, 54);
-		const left = Math.max(24, Math.min(Math.round(bounds.minX), Math.max(24, canvasWidth - 380)));
+		const top = Math.max(Math.round(bounds.maxY + 16), this.magicMaxReplyBottomY + 12, 54);
+		const left = Math.max(20, Math.min(Math.round(bounds.minX), Math.max(20, canvasWidth - 440)));
 
 		const card = document.createElement('div');
 		card.className = 'bimo-magic-diary-reply';
 		card.style.left = `${left}px`;
 		card.style.top = `${top}px`;
-		card.addEventListener('pointerdown', (e) => e.stopPropagation());
-		card.addEventListener('click', (e) => e.stopPropagation());
+		card.addEventListener('pointerdown', (e) => {
+			if (e.pointerType === 'pen' && !(e.target as HTMLElement)?.closest('button, select, a, input')) {
+				return;
+			}
+			e.stopPropagation();
+		});
+		card.addEventListener('click', (e) => {
+			if (!(e.target as HTMLElement)?.closest('button, select, a, input')) {
+				return;
+			}
+			e.stopPropagation();
+		});
+
+		const headerEl = document.createElement('div');
+		headerEl.className = 'bimo-magic-diary-reply__header';
 
 		if (heard) {
 			const heardEl = document.createElement('div');
 			heardEl.className = 'bimo-magic-diary-reply__heard';
 			heardEl.textContent = `“${heard}”`;
-			card.appendChild(heardEl);
+			headerEl.appendChild(heardEl);
+		} else {
+			const crest = document.createElement('div');
+			crest.className = 'bimo-magic-diary-reply__heard';
+			crest.textContent = '✦ 魔法回应';
+			headerEl.appendChild(crest);
 		}
+
+		const collapseBtn = document.createElement('button');
+		collapseBtn.type = 'button';
+		collapseBtn.className = 'bimo-magic-diary-reply__action bimo-magic-diary-reply__action--collapse';
+		collapseBtn.textContent = '−';
+		collapseBtn.title = t('Collapse reply');
+		collapseBtn.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const collapsed = card.classList.toggle('is-collapsed');
+			collapseBtn.textContent = collapsed ? '+' : '−';
+			collapseBtn.title = collapsed ? t('Expand reply') : t('Collapse reply');
+		});
+		headerEl.appendChild(collapseBtn);
+		card.appendChild(headerEl);
 
 		const bodyEl = document.createElement('div');
 		bodyEl.className = 'bimo-magic-diary-reply__body';
@@ -2535,7 +2637,7 @@ export class MdInkOverlay {
 		card.appendChild(footerEl);
 		container.appendChild(card);
 
-		this.magicMaxReplyBottomY = Math.max(this.magicMaxReplyBottomY, top + 120);
+		this.magicMaxReplyBottomY = Math.max(this.magicMaxReplyBottomY, top + 100);
 		this.syncLayerSize();
 		this.renderPaper();
 

@@ -559,6 +559,68 @@ describe('PillStylePopover fingerDraws toggle & PdfInkOverlay selection mutation
 		overlayPixel.destroy();
 		dom.remove();
 	});
+
+	test('renders paper efficiently via SVG pattern instead of repeated DOM lines', () => {
+		const dom = document.createElement('div');
+		const scroller = document.createElement('div');
+		scroller.className = 'cm-scroller';
+		const content = document.createElement('div');
+		content.className = 'cm-content';
+		scroller.appendChild(content);
+		dom.appendChild(scroller);
+		document.body.appendChild(dom);
+
+		const fakeView = {
+			dom,
+			scrollDOM: scroller,
+			contentDOM: content,
+			state: {
+				doc: {
+					lines: 1,
+					toString: () => 'Paper note',
+					line: () => ({ number: 1, from: 0, text: 'Paper note' }),
+					lineAt: () => ({ number: 1, from: 0, text: 'Paper note' }),
+				},
+				selection: { main: { head: 0 } },
+			},
+			posAtCoords: () => 0,
+			coordsAtPos: () => ({ top: 0 }),
+			lineBlockAt: () => ({ top: 0 }),
+			dispatch: jest.fn(),
+		};
+
+		const overlay = new MdInkOverlay(
+			fakeView as never,
+			'paper.md',
+			{
+				brush: 'pen',
+				size: 4,
+				colour: '#111111',
+				mouseDrawing: true,
+				fingerDraws: false,
+				paper: 'ruled',
+				eraserRadius: 10,
+				shapeSnap: false,
+			},
+			createEmptyMdInkDocument('paper.md'),
+		);
+
+		const svg = scroller.querySelector('svg.bimo-md-ink-svg');
+		expect(svg).not.toBeNull();
+		const defs = svg?.querySelector('defs');
+		expect(defs).not.toBeNull();
+		expect(defs?.querySelector('pattern[id*="ruled"]')).not.toBeNull();
+		expect(defs?.querySelector('pattern[id*="grid"]')).not.toBeNull();
+		expect(defs?.querySelector('pattern[id*="dots"]')).not.toBeNull();
+
+		const paperGroup = svg?.querySelector('.bimo-md-ink-paper');
+		const paperRect = paperGroup?.querySelector('rect');
+		expect(paperRect).not.toBeNull();
+		expect(paperRect?.getAttribute('fill')).toMatch(/url\(#bimo-paper-ruled/);
+
+		overlay.destroy();
+		dom.remove();
+	});
 });
 
 describe('Magic Diary Presets & Prompt Customization', () => {
