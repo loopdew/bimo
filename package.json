@@ -1,6 +1,6 @@
 {
 	"name": "bimo",
-	"version": "0.4.8",
+	"version": "0.4.9",
 	"description": "笔墨 — Obsidian 手写与批注插件",
 	"private": true,
 	"main": "main.js",

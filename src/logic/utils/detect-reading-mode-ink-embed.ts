@@ -37,9 +37,9 @@ export function findReadingModeInkEmbedCandidates(
 	const candidates: ReadingModeInkEmbedCandidate[] = [];
 
 	for (const embedKind of ['drawing', 'writing'] as const) {
-		const altText = INK_EMBED_ALT_BY_KIND[embedKind];
 		const editLinkFragment = INK_EDIT_LINK_FRAGMENT_BY_KIND[embedKind];
-		const markerSelector = `.internal-embed[alt="${altText}"], img[alt="${altText}"]`;
+		// Find any internal-embed or img; pairing with editLinkFragment ensures only ink embeds match
+		const markerSelector = '.internal-embed, img';
 		const markerEls = rootEl.querySelectorAll<HTMLElement>(markerSelector);
 
 		markerEls.forEach((embedMarkerEl) => {

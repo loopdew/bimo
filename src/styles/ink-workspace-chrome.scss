@@ -36,3 +36,10 @@ body.ddc_ink_hide-workspace-chrome .ddc_ink_drawing-editor.ink_dominant-hand_lef
 	left: 50%;
 	transform: translate(-50%, -50%);
 }
+
+/* Hide internal embed anchor links globally across all views */
+a[href*="bimo.invalid"],
+a[href*="type=inkWriting"],
+a[href*="type=inkDrawing"] {
+	display: none !important;
+}

@@ -838,13 +838,17 @@ function detectMarkdownEmbedLink(mdFile: TFile, previewLinkStartNode: SyntaxNode
 
     // If the start node was "[", then the next node must be alt text
     if(transcriptStartNode.to-transcriptStartNode.from === 1) {
-        transcriptTextNode = nextNode;
-        // console.log(`---- Found transcript text:`, `"${transaction.state.doc.sliceString(transcriptTextNode.from, transcriptTextNode.to)}"`);
-        transcriptEndNode = transcriptTextNode.node.nextSibling;
-        if(!transcriptEndNode || !transcriptEndNode.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
-            return {alterFlow: 'continue-traversal'};
+        let curr: SyntaxNodeRef | null = nextNode;
+        while (curr && !curr.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
+            if (transaction.state.doc.sliceString(curr.from, curr.to).includes('\n')) {
+                return { alterFlow: 'continue-traversal' };
+            }
+            curr = curr.node.nextSibling;
         }
-        // console.log(`---- Found transcript end:`, `"${transaction.state.doc.sliceString(transcriptEndNode.from, transcriptEndNode.to)}"`);
+        if (!curr || !curr.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
+            return { alterFlow: 'continue-traversal' };
+        }
+        transcriptEndNode = curr;
         nextNode = transcriptEndNode.node.nextSibling;
     }
     

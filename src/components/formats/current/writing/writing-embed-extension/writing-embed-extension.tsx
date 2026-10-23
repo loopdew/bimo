@@ -702,12 +702,17 @@ function detectMarkdownEmbedLinkWriting(
     if (!nextNode) return { alterFlow: 'continue-traversal' };
 
     if (transcriptStartNode.to - transcriptStartNode.from === 1) {
-        const transcriptTextNode = nextNode;
-        const transcriptEndNode = transcriptTextNode.node.nextSibling;
-        if (!transcriptEndNode || !transcriptEndNode.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
+        let curr: SyntaxNodeRef | null = nextNode;
+        while (curr && !curr.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
+            if (transaction.state.doc.sliceString(curr.from, curr.to).includes('\n')) {
+                return { alterFlow: 'continue-traversal' };
+            }
+            curr = curr.node.nextSibling;
+        }
+        if (!curr || !curr.name.includes('formatting_formatting-image_image_image-alt-text_link')) {
             return { alterFlow: 'continue-traversal' };
         }
-        nextNode = transcriptEndNode.node.nextSibling;
+        nextNode = curr.node.nextSibling;
     }
 
     const previewUrlStartNode = nextNode;

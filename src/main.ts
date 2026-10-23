@@ -256,6 +256,31 @@ export default class InkPlugin extends Plugin {
 				initHandwritingTranscriptionQueue(this);
 			});
 
+			// Intercept clicks on internal Bimo embed links (e.g. bimo.invalid / type=inkWriting / type=inkDrawing)
+			// so Obsidian never invokes external browser opening.
+			this.registerDomEvent(
+				document,
+				'click',
+				(event: MouseEvent) => {
+					const target = event.target as HTMLElement | null;
+					const linkEl = target?.closest('a, .cm-link, [data-href]') as HTMLElement | null;
+					if (!linkEl) return;
+					const href = linkEl.getAttribute('href') || linkEl.getAttribute('data-href') || linkEl.textContent || '';
+					if (
+						href.includes('bimo.invalid') ||
+						href.includes('type=inkWriting') ||
+						href.includes('type=inkDrawing') ||
+						href.trim() === 'Edit Writing' ||
+						href.trim() === 'Edit Drawing'
+					) {
+						event.preventDefault();
+						event.stopPropagation();
+						event.stopImmediatePropagation();
+					}
+				},
+				true,
+			);
+
 			logToVault(`Plugin loaded. writing=${this.settings.writingEnabled}, drawing=${this.settings.drawingEnabled}, boox=${getBooxConnectionEnabled()}`);
 
 			await runInkOnloadStep('addIcons', () => {
