@@ -742,4 +742,20 @@ export const ZH_CN: Record<string, string> = {
 	'Write custom instructions for how the enchanted page should answer your handwritten ink…':
 		'写下专属提示词，规定魔法书页如何解读并回应你的手写内容…',
 	'Diary response mode': '书页回复模式',
+	// ── 设置页优化 ──────────────────────────────────────────
+	'Writing & drawing embeds': '嵌入手写与绘图',
+	'AI & model': 'AI 与模型',
+	'Device & general': '设备与常规',
+	'Inline handwriting and drawing canvases embedded directly between note paragraphs.':
+		'在笔记段落之间嵌入独立手写块与绘图框，随笔记一同排版与展示。',
+	'Where the model lives. Powers transcription, Magic Diary Pages, and magic margins.':
+		'配置大模型接口，驱动笔记转录、魔法书页问答与边栏灵感。',
+	'Stylus behavior, display modes, and vault attachment storage.':
+		'手写笔适配、显示优化与附件存储管理。',
+	'Handwriting embeds': '嵌入手写块',
+	'Drawing canvas embeds': '嵌入绘图画板',
+	'Automatic transcription': '智能转录与图注',
+	'Stylus & input': '手写笔与交互',
+	'File locations': '文件存储位置',
+	'Maintenance & advanced': '系统维护与高级',
 };

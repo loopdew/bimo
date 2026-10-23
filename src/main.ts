@@ -995,9 +995,13 @@ function registerInkEditorMenus(plugin: InkPlugin) {
 // }
 
 function showOnboardingTips_maybe(plugin: InkPlugin) {
-	const newInstall = showWelcomeTips_maybe(plugin);
-
-	if (!newInstall) {
-		showVersionNotice(plugin);
+	// Silently acknowledge onboarding flags so no annoying popups interrupt the user
+	if (!plugin.settings.onboardingTips.welcomeTipRead) {
+		plugin.settings.onboardingTips.welcomeTipRead = true;
+		void plugin.saveSettings();
+	}
+	if (plugin.settings.onboardingTips.lastVersionTipRead !== plugin.manifest.version) {
+		plugin.settings.onboardingTips.lastVersionTipRead = plugin.manifest.version;
+		void plugin.saveSettings();
 	}
 }
