@@ -753,6 +753,8 @@ export class MdInkOverlay {
 			this.options.paper = this.previousPaperBeforeMagic;
 			this.previousPaperBeforeMagic = null;
 		}
+		this.view.dom.classList.remove('bimo-md-ink-writing-active');
+		document.body.classList.remove('bimo-md-ink-writing-active');
 		this.component.unload();
 		this.scrollerEl.classList.remove('bimo-magic-diary-active');
 		for (const dispose of this.disposers) dispose();
@@ -1288,11 +1290,12 @@ export class MdInkOverlay {
 
 	private applyToolCursor(): void {
 		const tool = this.getTool();
-		this.layer.style.pointerEvents = tool === 'pan' ? 'none' : 'auto';
+		const isDrawing = tool !== 'pan';
+		this.layer.style.pointerEvents = isDrawing ? 'auto' : 'none';
 		this.layer.dataset.tool = tool;
-		// CSS keys off this: drawing fingers means claiming the touch stream, so
-		// only then may the layer set `touch-action: none`.
 		this.layer.dataset.fingerDraws = this.options.fingerDraws ? 'true' : 'false';
+		this.view.dom.classList.toggle('bimo-md-ink-writing-active', isDrawing);
+		document.body.classList.toggle('bimo-md-ink-writing-active', isDrawing);
 		this.syncPill();
 	}
 

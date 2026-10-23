@@ -23,8 +23,14 @@
 	touch-action: pan-y pinch-zoom;
 }
 
+/* While a drawing tool is active, touch-action: none prevents mobile edge swipe gestures (e.g. sidebar opening) */
+.bimo-md-ink-layer:not([data-tool='pan']),
 .bimo-md-ink-layer[data-finger-draws='true'] {
-	touch-action: none;
+	touch-action: none !important;
+}
+
+body.bimo-md-ink-writing-active .cm-editor {
+	touch-action: none !important;
 }
 
 .bimo-md-ink-svg {
@@ -490,8 +496,9 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	touch-action: pan-y pinch-zoom;
 }
 
+.bimo-pdf-ink-svg:not([data-tool='pan']),
 .bimo-pdf-ink-svg[data-finger-draws='true'] {
-	touch-action: none;
+	touch-action: none !important;
 }
 
 .bimo-pdf-ink-svg[data-tool='pen'],

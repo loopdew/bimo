@@ -1,4 +1,4 @@
-import type { App } from 'obsidian';
+import { Platform, type App } from 'obsidian';
 import type { MdInkOverlay } from './md-ink-overlay';
 import type { MdInkPaper, MdInkTool } from './types';
 
@@ -57,7 +57,36 @@ export class MdInkController {
 	/** In-flight ink-file moves, keyed by the destination path. */
 	private readonly moves = new Map<string, Promise<void>>();
 
-	constructor(private readonly app: App) {}
+	constructor(private readonly app: App) {
+		this.installMobileSwipeGuard();
+	}
+
+	private installMobileSwipeGuard(): void {
+		if (!Platform.isMobile) return;
+		const workspace = this.app.workspace as any;
+		if (!workspace) return;
+		const proto = Object.getPrototypeOf(workspace);
+		if (!proto || typeof proto.trigger !== 'function' || proto.trigger.__bimo_swipe_guard) return;
+
+		const originalTrigger = proto.trigger;
+		const self = this;
+		proto.trigger = function (this: any, eventName: string, ...args: any[]) {
+			try {
+				if (eventName === 'swipe') {
+					const data = args[0];
+					if (data && data.direction === 'x') {
+						if (self.tool !== 'pan') {
+							return this;
+						}
+					}
+				}
+			} catch {
+				/* fall through */
+			}
+			return originalTrigger.apply(this, [eventName, ...args]);
+		};
+		proto.trigger.__bimo_swipe_guard = true;
+	}
 
 	/** Record that `from` became `to`, and keep the move promise for later reads. */
 	noteRename(from: string, to: string, move: Promise<void>): void {
