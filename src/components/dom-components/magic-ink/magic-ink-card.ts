@@ -38,6 +38,7 @@ export class MagicInkCard {
 	private component = new Component();
 
 	constructor(host: HTMLElement, options: MagicInkCardOptions = {}) {
+		this.component.load();
 		this.host = host;
 		this.options = options;
 	}

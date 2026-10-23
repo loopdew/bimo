@@ -54,8 +54,33 @@
 	border-radius: 12px;
 	font-size: 1.02em;
 	line-height: 1.75;
-	white-space: pre-wrap;
 	word-break: break-word;
+
+	&.ddc_ink_magic-panel__bubble--writing {
+		white-space: pre-wrap;
+	}
+
+	p {
+		margin: 0.35em 0;
+		&:first-child { margin-top: 0; }
+		&:last-child { margin-bottom: 0; }
+	}
+
+	ul, ol {
+		margin: 0.3em 0 0.3em 1.2em;
+		padding: 0;
+	}
+
+	code {
+		font-size: 0.9em;
+		padding: 0.15em 0.35em;
+		border-radius: 4px;
+		background: rgba(0, 0, 0, 0.06);
+	}
+}
+
+.theme-dark .ddc_ink_magic-panel__bubble code {
+	background: rgba(255, 255, 255, 0.08);
 }
 
 .ddc_ink_magic-panel__bubble--user {

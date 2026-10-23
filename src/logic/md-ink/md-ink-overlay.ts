@@ -229,6 +229,7 @@ export class MdInkOverlay {
 	private linesCache: { doc: unknown; lines: string[] } | null = null;
 
 	constructor(view: EditorView, notePath: string, options: MdInkOverlayOptions, initial?: MdInkDocument) {
+		this.component.load();
 		this.view = view;
 		this.notePath = notePath;
 		this.options = { ...options };

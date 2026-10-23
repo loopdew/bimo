@@ -1,5 +1,5 @@
 import './magic-panel.scss';
-import { Editor, Modal, Notice } from 'obsidian';
+import { Component, Editor, MarkdownRenderer, Modal, Notice } from 'obsidian';
 import InkPlugin from 'src/main';
 import { t } from 'src/i18n';
 import { isAiEndpointUsable, requestAiCompletion } from 'src/logic/ai/client';
@@ -39,6 +39,7 @@ interface MessageBubble {
  *   click, because an assistant that writes into the page unasked is a liability.
  */
 export class MagicPanel extends Modal {
+	private readonly options: MagicPanelOptions;
 	private readonly plugin: InkPlugin;
 	private readonly editor?: Editor;
 	private readonly systemPrompt: string;
@@ -50,15 +51,18 @@ export class MagicPanel extends Modal {
 	private bubbles: MessageBubble[] = [];
 	private isBusy = false;
 	private typewriterTimer: number | null = null;
+	private component = new Component();
 
 	constructor(options: MagicPanelOptions) {
 		super(options.plugin.app);
+		this.options = options;
 		this.plugin = options.plugin;
 		this.editor = options.editor;
 		this.systemPrompt = MAGIC_PANEL_SYSTEM_PROMPT + buildTranscriptContext(options.contextTranscript);
 	}
 
 	onOpen() {
+		this.component.load();
 		this.modalEl.addClass('ddc_ink_magic-panel');
 		this.titleEl.setText(t('Magic margin'));
 		this.contentEl.addClass('ddc_ink_magic-panel__content');
@@ -94,6 +98,7 @@ export class MagicPanel extends Modal {
 	}
 
 	onClose() {
+		this.component.unload();
 		if (this.typewriterTimer !== null) {
 			window.clearInterval(this.typewriterTimer);
 			this.typewriterTimer = null;
@@ -121,9 +126,26 @@ export class MagicPanel extends Modal {
 	private appendAssistantNote(text: string): void {
 		const bubble = this.appendBubble('assistant', text);
 		bubble.el.addClass('ddc_ink_magic-panel__bubble--hint');
+		this.renderMarkdown(bubble.el, text);
 	}
 
-	/** Types `text` into the bubble two characters at a time. */
+	private renderMarkdown(el: HTMLElement, markdown: string): void {
+		try {
+			el.empty();
+			void MarkdownRenderer.render(
+				this.app,
+				markdown,
+				el,
+				this.options.sourcePath ?? '',
+				this.component,
+			);
+		} catch {
+			el.setText(markdown);
+		}
+		this.logEl?.scrollTo({ top: this.logEl.scrollHeight });
+	}
+
+	/** Types `text` into the bubble characters at a time. */
 	private typeIntoBubble(bubble: MessageBubble, text: string): void {
 		if (this.typewriterTimer !== null) {
 			window.clearInterval(this.typewriterTimer);
@@ -141,9 +163,8 @@ export class MagicPanel extends Modal {
 				window.clearInterval(this.typewriterTimer);
 				this.typewriterTimer = null;
 			}
-			bubble.el.setText(text);
 			bubble.el.removeClass('ddc_ink_magic-panel__bubble--writing');
-			this.logEl?.scrollTo({ top: this.logEl.scrollHeight });
+			this.renderMarkdown(bubble.el, text);
 		};
 
 		// A click on the bubble skips the animation — nobody wants to wait for text

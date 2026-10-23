@@ -1,7 +1,7 @@
 {
 	"id": "bimo",
 	"name": "笔墨",
-	"version": "0.4.3",
+	"version": "0.4.4",
 	"minAppVersion": "1.8.7",
 	"description": "在笔记段落之间手写或绘图，也可直接在笔记正文与 PDF 页面上批注。可接入任意 OpenAI 兼容端点做手写识别。",
 	"author": "Ernest",

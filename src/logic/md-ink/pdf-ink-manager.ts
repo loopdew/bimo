@@ -414,6 +414,9 @@ export class PdfInkManager {
 		}
 
 		this.repairPills();
+		for (const entry of this.attached.values()) {
+			entry.overlay?.preserveScrollAcrossResize();
+		}
 	}
 
 	private async attach(

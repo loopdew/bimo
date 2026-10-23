@@ -116,6 +116,15 @@ export class PdfInkOverlay {
 	private undoStack: PdfUndoEntry[] = [];
 	private redoStack: PdfUndoEntry[] = [];
 
+	private scrollerEl: HTMLElement | null = null;
+	private scrollHandler: (() => void) | null = null;
+	private lastScrollTop = 0;
+	private lastScrollRatio = 0;
+	private lastVisiblePage = 1;
+	private isDrawing = false;
+	private lockedScrollTop = 0;
+	private unlockScrollTimer: number | null = null;
+
 	constructor(
 		private readonly app: App,
 		private readonly containerEl: HTMLElement,
@@ -129,14 +138,35 @@ export class PdfInkOverlay {
 	}
 
 	private start(): void {
+		this.initScroller();
 		this.scan();
 		if (typeof MutationObserver !== 'undefined') {
-			this.observer = new MutationObserver(() => this.queueScan());
+			this.observer = new MutationObserver((mutations) => {
+				const hasExternalMutation = mutations.some((m) => {
+					const target = m.target as HTMLElement;
+					if (target.classList?.contains('bimo-pdf-ink-svg') || target.closest?.('.bimo-pdf-ink-svg')) {
+						return false;
+					}
+					for (const node of Array.from(m.addedNodes)) {
+						if ((node as HTMLElement).classList?.contains('bimo-pdf-ink-svg')) return false;
+					}
+					for (const node of Array.from(m.removedNodes)) {
+						if ((node as HTMLElement).classList?.contains('bimo-pdf-ink-svg')) return false;
+					}
+					return true;
+				});
+				if (hasExternalMutation) {
+					this.queueScan();
+				}
+			});
 			this.observer.observe(this.containerEl, { childList: true, subtree: true });
 		}
 
 		if (typeof ResizeObserver !== 'undefined') {
-			this.resizeObserver = new ResizeObserver(() => this.repaintAll());
+			this.resizeObserver = new ResizeObserver(() => {
+				this.preserveScrollAcrossResize();
+				this.repaintAll();
+			});
 			for (const layer of this.layers.values()) this.resizeObserver.observe(layer.pageEl);
 		}
 
@@ -167,6 +197,15 @@ export class PdfInkOverlay {
 
 	destroy(): void {
 		this.destroyed = true;
+		if (this.unlockScrollTimer !== null) {
+			window.clearTimeout(this.unlockScrollTimer);
+			this.unlockScrollTimer = null;
+		}
+		if (this.scrollerEl && this.scrollHandler) {
+			this.scrollerEl.removeEventListener('scroll', this.scrollHandler);
+			this.scrollHandler = null;
+			this.scrollerEl = null;
+		}
 		this.clearHoldSnapTimer();
 		this.touchTapUndo?.destroy();
 		this.touchTapUndo = null;
@@ -178,6 +217,85 @@ export class PdfInkOverlay {
 		this.resizeObserver?.disconnect();
 		for (const layer of this.layers.values()) layer.svg.remove();
 		this.layers.clear();
+	}
+
+	private findScroller(): HTMLElement | null {
+		const parent = this.containerEl.closest('.pdf-container, #viewerContainer, .viewerContainer, .view-content');
+		if (parent instanceof HTMLElement && parent.scrollHeight > parent.clientHeight) {
+			return parent;
+		}
+		let curr: HTMLElement | null = this.containerEl;
+		while (curr && curr !== document.body) {
+			const oy = window.getComputedStyle(curr).overflowY;
+			if ((oy === 'auto' || oy === 'scroll') && curr.scrollHeight > curr.clientHeight) {
+				return curr;
+			}
+			curr = curr.parentElement;
+		}
+		return null;
+	}
+
+	private initScroller(): void {
+		this.scrollerEl = this.findScroller();
+		if (this.scrollerEl) {
+			this.scrollHandler = () => {
+				if (!this.scrollerEl) return;
+				const st = this.scrollerEl.scrollTop;
+				if (this.isDrawing) {
+					if (this.lockedScrollTop > 0 && Math.abs(st - this.lockedScrollTop) > 2) {
+						this.scrollerEl.scrollTop = this.lockedScrollTop;
+					}
+					return;
+				}
+				this.lastScrollTop = st;
+				const max = this.scrollerEl.scrollHeight - this.scrollerEl.clientHeight;
+				this.lastScrollRatio = max > 0 ? st / max : 0;
+				this.updateVisiblePage();
+			};
+			this.scrollerEl.addEventListener('scroll', this.scrollHandler, { passive: true });
+			this.updateVisiblePage();
+		}
+	}
+
+	private updateVisiblePage(): void {
+		if (!this.scrollerEl) return;
+		const sRect = this.scrollerEl.getBoundingClientRect();
+		const centerY = sRect.top + sRect.height / 2;
+		for (const layer of this.layers.values()) {
+			const r = layer.pageEl.getBoundingClientRect();
+			if (r.top <= centerY && r.bottom >= centerY) {
+				this.lastVisiblePage = layer.pageNumber;
+				break;
+			}
+		}
+	}
+
+	preserveScrollAcrossResize(): void {
+		if (!this.scrollerEl) this.initScroller();
+		const scroller = this.scrollerEl;
+		if (!scroller) return;
+
+		const pageToRestore = this.lastVisiblePage;
+		const ratioToRestore = this.lastScrollRatio;
+		const prevScrollTop = this.lastScrollTop;
+
+		if (pageToRestore > 1 || prevScrollTop > 40) {
+			const attemptRestore = () => {
+				if (this.destroyed || !scroller.isConnected) return;
+				if (scroller.scrollTop < 15) {
+					const targetLayer = this.layers.get(pageToRestore);
+					if (targetLayer && targetLayer.pageEl.isConnected) {
+						targetLayer.pageEl.scrollIntoView({ block: 'center', inline: 'nearest' });
+					} else if (ratioToRestore > 0) {
+						const max = scroller.scrollHeight - scroller.clientHeight;
+						scroller.scrollTop = Math.round(ratioToRestore * max);
+					}
+				}
+			};
+			requestAnimationFrame(attemptRestore);
+			window.setTimeout(attemptRestore, 60);
+			window.setTimeout(attemptRestore, 220);
+		}
 	}
 
 	setOptions(patch: Partial<PdfInkOverlayOptions>): void {
@@ -391,8 +509,8 @@ export class PdfInkOverlay {
 		const height = rect.height;
 		if (width <= 0 || height <= 0) return;
 
-		svg.setAttribute('width', String(width));
-		svg.setAttribute('height', String(height));
+		svg.style.width = '100%';
+		svg.style.height = '100%';
 		svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
 
 		// Keep the live path element from the previous frame; everything else is
@@ -505,6 +623,16 @@ export class PdfInkOverlay {
 			event.stopPropagation();
 			this.activePointerId = event.pointerId;
 			svg.setPointerCapture?.(event.pointerId);
+
+			this.isDrawing = true;
+			if (this.unlockScrollTimer !== null) {
+				window.clearTimeout(this.unlockScrollTimer);
+				this.unlockScrollTimer = null;
+			}
+			if (!this.scrollerEl) this.initScroller();
+			if (this.scrollerEl) {
+				this.lockedScrollTop = this.scrollerEl.scrollTop;
+			}
 
 			const isTransientEraser = event.button === 5
 				|| ((this.options.tool === 'pen' || this.options.tool === 'highlighter') && (event.ctrlKey || event.metaKey));
@@ -685,6 +813,17 @@ export class PdfInkOverlay {
 			this.clearHoldSnapTimer();
 			svg.releasePointerCapture?.(event.pointerId);
 
+			if (this.scrollerEl && this.lockedScrollTop > 0 && this.scrollerEl.scrollTop < 15) {
+				this.scrollerEl.scrollTop = this.lockedScrollTop;
+			}
+			this.unlockScrollTimer = window.setTimeout(() => {
+				this.isDrawing = false;
+				this.unlockScrollTimer = null;
+				if (this.scrollerEl && this.lockedScrollTop > 0 && this.scrollerEl.scrollTop < 15) {
+					this.scrollerEl.scrollTop = this.lockedScrollTop;
+				}
+			}, 350);
+
 			if (this.lassoState && this.lassoState.page === pageNumber) {
 				const state = this.lassoState;
 				this.lassoState = null;
@@ -765,6 +904,7 @@ export class PdfInkOverlay {
 		svg.addEventListener('pointercancel', (event) => {
 			if (event.pointerId !== this.activePointerId) return;
 			this.activePointerId = null;
+			this.isDrawing = false;
 			this.transientEraser = false;
 			this.clearHoldSnapTimer();
 			this.lassoState = null;
