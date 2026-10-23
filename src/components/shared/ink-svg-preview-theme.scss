@@ -15,8 +15,11 @@
 
 .ddc_ink_writing-embed-preview,
 .ddc_ink_drawing-embed-preview {
-	// !important beats baked fill="#000000" presentation attributes in saved SVGs.
-	path { fill: var(--text-normal) !important; }
+	// Adapt monochrome ink paths to theme text colour, while strictly preserving
+	// user-chosen custom stroke colours (e.g. red, blue, green, yellow highlighter).
+	path:where([fill="#000000"], [fill="#000"], [fill="black"], [fill="currentColor"], :not([fill])):not(.ink-color-custom) {
+		fill: var(--text-normal) !important;
+	}
 }
 
 .ddc_ink_drawing-embed-preview {

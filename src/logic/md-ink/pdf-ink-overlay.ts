@@ -47,6 +47,7 @@ export interface PdfInkOverlayOptions {
 	 * and reserves drawing for a stylus.
 	 */
 	fingerDraws: boolean;
+	eraserMode?: 'stroke' | 'pixel';
 	eraserRadius: number;
 	shapeSnap: boolean;
 	tool: 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'pan';
@@ -56,6 +57,7 @@ export interface PdfInkOverlayOptions {
 type PdfUndoEntry =
 	| { type: 'add'; stroke: PdfInkStroke }
 	| { type: 'remove'; strokes: PdfInkStroke[] }
+	| { type: 'replace'; removed: PdfInkStroke[]; added: PdfInkStroke[] }
 	| { type: 'move'; moves: Array<{ id: string; from: InkPoint[]; to: InkPoint[] }> }
 	| { type: 'restyle'; changes: Array<{ id: string; fromColor: string; toColor: string }> };
 
@@ -71,6 +73,10 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const HOLD_SNAP_JITTER_PX = 3;
 
 let pdfStrokeCounter = 0;
+function newPdfStrokeId(): string {
+	pdfStrokeCounter += 1;
+	return `pdf_${Date.now().toString(36)}_${pdfStrokeCounter}`;
+}
 
 export class PdfInkOverlay {
 	private doc: PdfInkDocument;
@@ -817,23 +823,75 @@ export class PdfInkOverlay {
 		const rect = svg.getBoundingClientRect();
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
+		const isPixel = this.options.eraserMode === 'pixel';
 
 		const remaining: PdfInkStroke[] = [];
 		const removed: PdfInkStroke[] = [];
+		const added: PdfInkStroke[] = [];
+
 		for (const stroke of this.doc.strokes) {
 			if (stroke.page !== pageNumber) {
 				remaining.push(stroke);
 				continue;
 			}
-			const points = fromPageSpace(stroke.points, rect.width, rect.height);
-			const hit = points.some(([px, py]) => Math.hypot(px - x, py - y) <= radius);
-			if (hit) removed.push(stroke);
-			else remaining.push(stroke);
+			const screenPoints = fromPageSpace(stroke.points, rect.width, rect.height);
+
+			if (!isPixel) {
+				const hit = screenPoints.some(([px, py]) => Math.hypot(px - x, py - y) <= radius);
+				if (hit) removed.push(stroke);
+				else remaining.push(stroke);
+			} else {
+				let anyHit = false;
+				const hitFlags = screenPoints.map(([px, py]) => {
+					const isHit = Math.hypot(px - x, py - y) <= radius;
+					if (isHit) anyHit = true;
+					return isHit;
+				});
+
+				if (!anyHit) {
+					remaining.push(stroke);
+					continue;
+				}
+
+				removed.push(stroke);
+				const runs: InkPoint[][] = [];
+				let currentRun: InkPoint[] = [];
+
+				for (let i = 0; i < stroke.points.length; i++) {
+					if (!hitFlags[i]) {
+						currentRun.push(stroke.points[i]);
+					} else {
+						if (currentRun.length > 0) {
+							runs.push(currentRun);
+							currentRun = [];
+						}
+					}
+				}
+				if (currentRun.length > 0) {
+					runs.push(currentRun);
+				}
+
+				for (const run of runs) {
+					if (run.length >= 1) {
+						added.push({
+							id: newPdfStrokeId(),
+							page: stroke.page,
+							points: run,
+							style: { ...stroke.style },
+							createdAt: Date.now(),
+						});
+					}
+				}
+			}
 		}
 
-		if (removed.length === 0) return;
-		this.doc.strokes = remaining;
-		this.undoStack.push({ type: 'remove', strokes: removed });
+		if (removed.length === 0 && added.length === 0) return;
+		this.doc.strokes = [...remaining, ...added];
+		if (added.length > 0) {
+			this.undoStack.push({ type: 'replace', removed, added });
+		} else {
+			this.undoStack.push({ type: 'remove', strokes: removed });
+		}
 		this.redoStack = [];
 		this.doc.updatedAt = Date.now();
 		this.options.onChange?.(this.doc);
@@ -902,6 +960,10 @@ export class PdfInkOverlay {
 			this.doc.strokes = this.doc.strokes.filter((s) => s.id !== entry.stroke.id);
 		} else if (entry.type === 'remove') {
 			this.doc.strokes.push(...entry.strokes);
+		} else if (entry.type === 'replace') {
+			const addedIds = new Set(entry.added.map((s) => s.id));
+			this.doc.strokes = this.doc.strokes.filter((s) => !addedIds.has(s.id));
+			this.doc.strokes.push(...entry.removed);
 		} else if (entry.type === 'move') {
 			const map = new Map(entry.moves.map((m) => [m.id, m.from]));
 			for (const s of this.doc.strokes) {
@@ -930,6 +992,10 @@ export class PdfInkOverlay {
 		} else if (entry.type === 'remove') {
 			const ids = new Set(entry.strokes.map((s) => s.id));
 			this.doc.strokes = this.doc.strokes.filter((s) => !ids.has(s.id));
+		} else if (entry.type === 'replace') {
+			const removedIds = new Set(entry.removed.map((s) => s.id));
+			this.doc.strokes = this.doc.strokes.filter((s) => !removedIds.has(s.id));
+			this.doc.strokes.push(...entry.added);
 		} else if (entry.type === 'move') {
 			const map = new Map(entry.moves.map((m) => [m.id, m.to]));
 			for (const s of this.doc.strokes) {

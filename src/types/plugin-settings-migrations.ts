@@ -125,11 +125,20 @@ export function migrateOutdatedSettings(raw: Record<string, unknown>): PluginSet
 	if (!settings.mdInkPaper) {
 		settings.mdInkPaper = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkPaper;
 	}
+	if (settings.mdInkEraserMode !== 'stroke' && settings.mdInkEraserMode !== 'pixel') {
+		settings.mdInkEraserMode = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkEraserMode;
+	}
 	if (typeof settings.mdInkEraserRadius !== 'number' || !Number.isFinite(settings.mdInkEraserRadius)) {
 		settings.mdInkEraserRadius = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkEraserRadius;
 	}
 	if (typeof settings.mdInkShapeSnap !== 'boolean') {
 		settings.mdInkShapeSnap = DEFAULT_PLUGIN_SETTINGS_0_5_0.mdInkShapeSnap;
+	}
+	if (!settings.magicDiaryPreset) {
+		settings.magicDiaryPreset = DEFAULT_PLUGIN_SETTINGS_0_5_0.magicDiaryPreset;
+	}
+	if (typeof settings.magicDiaryCustomPrompt !== 'string') {
+		settings.magicDiaryCustomPrompt = DEFAULT_PLUGIN_SETTINGS_0_5_0.magicDiaryCustomPrompt;
 	}
 
 	return settings;

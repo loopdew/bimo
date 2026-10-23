@@ -222,8 +222,15 @@ export function createMdInkExtension(plugin: MyPlugin): Extension {
 						mouseDrawing: plugin.settings.mdInkMouseDrawing,
 						fingerDraws: plugin.settings.mdInkFingerDraws,
 						paper: plugin.settings.mdInkPaper,
+						eraserMode: plugin.settings.mdInkEraserMode,
 						eraserRadius: plugin.settings.mdInkEraserRadius,
 						shapeSnap: plugin.settings.mdInkShapeSnap,
+						magicPreset: plugin.settings.magicDiaryPreset,
+						magicCustomPrompt: plugin.settings.magicDiaryCustomPrompt,
+						onMagicPresetChange: (preset) => {
+							plugin.settings.magicDiaryPreset = preset;
+							void plugin.saveSettings();
+						},
 						onChange: () => this.scheduleSave(),
 						onToolSelected: (tool) => plugin.mdInk.setTool(tool),
 						onStyleChange: (patch) => {
@@ -231,6 +238,7 @@ export function createMdInkExtension(plugin: MyPlugin): Extension {
 							if (patch.colour !== undefined) plugin.settings.mdInkColour = patch.colour;
 							if (patch.size !== undefined) plugin.settings.mdInkSize = patch.size;
 							if (patch.paper !== undefined) plugin.settings.mdInkPaper = patch.paper;
+							if (patch.eraserMode !== undefined) plugin.settings.mdInkEraserMode = patch.eraserMode;
 							if (patch.fingerDraws !== undefined) plugin.settings.mdInkFingerDraws = patch.fingerDraws;
 							plugin.mdInk.refreshOptions(patch);
 							void plugin.saveSettings();

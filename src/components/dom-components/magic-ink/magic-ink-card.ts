@@ -1,4 +1,6 @@
 import './magic-ink-card.scss';
+import { Component, MarkdownRenderer } from 'obsidian';
+import { getGlobals } from 'src/stores/global-store';
 import { t } from 'src/i18n';
 
 //////////
@@ -33,6 +35,7 @@ export class MagicInkCard {
 	private typeTimer: number | null = null;
 	private replyText = '';
 	private removeTimer: number | null = null;
+	private component = new Component();
 
 	constructor(host: HTMLElement, options: MagicInkCardOptions = {}) {
 		this.host = host;
@@ -88,6 +91,7 @@ export class MagicInkCard {
 			body.setText(trimmed.slice(0, cursor));
 			if (cursor >= trimmed.length) {
 				this.clearTypewriter();
+				this.renderMarkdown(body, trimmed);
 				this.renderActions();
 			}
 		}, TYPE_INTERVAL_MS);
@@ -96,9 +100,19 @@ export class MagicInkCard {
 		// wait for text they can already see arriving.
 		body.onclick = () => {
 			this.clearTypewriter();
-			body.setText(trimmed);
+			this.renderMarkdown(body, trimmed);
 			this.renderActions();
 		};
+	}
+
+	private renderMarkdown(body: HTMLElement, markdown: string): void {
+		try {
+			const app = getGlobals().plugin.app;
+			body.empty();
+			void MarkdownRenderer.render(app, markdown, body, '', this.component);
+		} catch {
+			body.setText(markdown);
+		}
 	}
 
 	showError(message: string): void {
@@ -138,6 +152,7 @@ export class MagicInkCard {
 			window.clearTimeout(this.removeTimer);
 			this.removeTimer = null;
 		}
+		this.component.unload();
 		this.el?.remove();
 		this.el = null;
 		this.bodyEl = null;

@@ -720,4 +720,26 @@ export const ZH_CN: Record<string, string> = {
 	'Append this exchange as Markdown text into the note': '将这段对话以 Markdown 正文追加到笔记中',
 	'Exchange inscribed into the note.': '对话已铭刻入笔记正文。',
 	'Fade this reply': '隐去这条回应',
+
+	// ── 橡皮模式与魔法书页增强 ─────────────────────────────
+	'Eraser mode': '橡皮擦除模式',
+	'Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.':
+		'整笔擦除触碰笔画任意处即删除整笔；局部/像素擦除可在触碰点精准截断笔画。',
+	'Object eraser': '整笔擦除',
+	'Partial eraser': '局部/像素擦除',
+	'You write a line, AI writes a line. Inspired by magical parchment and enchanted diaries. Choose from preset response styles or tailor your own system prompt.':
+		'你写一句，AI 回一句。灵感源于活点地图与魔法日记。可选用预设回复风格或完全自定义系统提示词。',
+	'Response style': '回复风格',
+	'Choose the persona and purpose of the Magic Diary Page.':
+		'选择魔法书页的交互人设与回应定位。',
+	'Companion': '对话伴侣',
+	'Explain & Teach': '深度解析',
+	'Brainstorm': '灵感续写',
+	'Problem Solver': '批改解题',
+	'Custom prompt': '自定义提示词',
+	'System prompt given to the AI when reading your handwriting on Magic Diary Pages.':
+		'魔法书页在解读你的手写墨迹并生成回应时使用的系统提示词（System Prompt）。',
+	'Write custom instructions for how the enchanted page should answer your handwritten ink…':
+		'写下专属提示词，规定魔法书页如何解读并回应你的手写内容…',
+	'Diary response mode': '书页回复模式',
 };

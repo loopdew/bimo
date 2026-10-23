@@ -1,6 +1,7 @@
 import { getStroke } from 'perfect-freehand';
-import { Notice, setIcon } from 'obsidian';
+import { Component, MarkdownRenderer, Notice, setIcon } from 'obsidian';
 import { t } from 'src/i18n';
+import { getGlobals } from 'src/stores/global-store';
 import type { EditorView } from '@codemirror/view';
 import type { InkBrushKind } from 'src/ink-canvas/brush-presets';
 import { INK_BRUSH_SWATCHES, resolveBrushPreset } from 'src/ink-canvas/brush-presets';
@@ -12,7 +13,9 @@ import { getSvgPathFromStroke } from 'src/ink-canvas/utils/svg-path-from-stroke'
 import {
 	hasMagicDiaryFrontmatter,
 	MAGIC_DIARY_PAUSE_MS,
+	MAGIC_DIARY_PRESETS,
 	requestMagicDiaryTurn,
+	type MagicDiaryPreset,
 } from 'src/logic/ai/magic-diary';
 import {
 	isCustomTranscriptionProviderUsable,
@@ -36,6 +39,7 @@ import {
 	resolvePaperStyle,
 	snapStrokePoints,
 	type MdInkDocument,
+	type MdInkEraserMode,
 	type MdInkPaper,
 	type MdInkStroke,
 	type MdInkTool,
@@ -93,10 +97,17 @@ export interface MdInkOverlayOptions {
 	 */
 	fingerDraws: boolean;
 	paper: MdInkPaper;
+	/** Eraser mode: stroke (整笔擦除) or pixel (局部/像素擦除). */
+	eraserMode?: MdInkEraserMode;
 	/** Eraser radius in CSS px. */
 	eraserRadius: number;
 	/** Straighten lines and close rectangles when the stroke clearly meant one. */
 	shapeSnap: boolean;
+	/** Magic diary preset mode. */
+	magicPreset?: MagicDiaryPreset;
+	/** Custom prompt for magic diary. */
+	magicCustomPrompt?: string;
+	onMagicPresetChange?: (preset: MagicDiaryPreset) => void;
 	/** Called after any mutation so the host can schedule a save. */
 	onChange?: (doc: MdInkDocument) => void;
 	/** A tool was picked from the floating pill; hosts propagate it to other notes. */
@@ -111,6 +122,7 @@ type UndoEntry =
 	| { type: 'add'; stroke: MdInkStroke }
 	| { type: 'addMany'; strokes: MdInkStroke[] }
 	| { type: 'remove'; strokes: MdInkStroke[] }
+	| { type: 'replace'; removed: MdInkStroke[]; added: MdInkStroke[] }
 	| { type: 'move'; shifts: Array<{ id: string; from: { x: number; y: number }; to: { x: number; y: number } }> }
 	| { type: 'restyle'; changes: Array<{ id: string; fromColor: string; toColor: string }> };
 
@@ -162,6 +174,9 @@ export class MdInkOverlay {
 	private magicPauseTimer: ReturnType<typeof setTimeout> | null = null;
 	private magicHistory: ChatTurn[] = [];
 	private magicMaxReplyBottomY = 0;
+	private previousPaperBeforeMagic: MdInkPaper | null = null;
+	private activeEraseSession: { removed: MdInkStroke[]; added: MdInkStroke[] } | null = null;
+	private component = new Component();
 	private svg!: SVGSVGElement;
 	private paperGroup!: SVGGElement;
 	private strokeGroup!: SVGGElement;
@@ -417,7 +432,30 @@ export class MdInkOverlay {
 			this.clearMagicReplies();
 		});
 
-		banner.append(crest, status, replyNowBtn, clearRepliesBtn);
+		const modeSelect = document.createElement('select');
+		modeSelect.className = 'bimo-magic-diary-banner__select';
+		modeSelect.title = t('Diary response mode');
+		const presets: Array<{ id: MagicDiaryPreset; label: string }> = [
+			{ id: 'chat', label: `💬 ${t('Companion')}` },
+			{ id: 'explain', label: `💡 ${t('Explain & Teach')}` },
+			{ id: 'brainstorm', label: `✍️ ${t('Brainstorm')}` },
+			{ id: 'solver', label: `📐 ${t('Problem Solver')}` },
+			{ id: 'custom', label: `⚙️ ${t('Custom')}` },
+		];
+		for (const p of presets) {
+			const opt = document.createElement('option');
+			opt.value = p.id;
+			opt.textContent = p.label;
+			modeSelect.appendChild(opt);
+		}
+		modeSelect.value = this.options.magicPreset ?? 'chat';
+		modeSelect.addEventListener('change', (e) => {
+			const val = (e.target as HTMLSelectElement).value as MagicDiaryPreset;
+			this.options.magicPreset = val;
+			this.options.onMagicPresetChange?.(val);
+		});
+
+		banner.append(crest, status, modeSelect, replyNowBtn, clearRepliesBtn);
 		this.magicBannerEl = banner;
 		this.layer.appendChild(banner);
 
@@ -476,16 +514,21 @@ export class MdInkOverlay {
 				colour: this.options.colour,
 				size: this.options.size,
 				paper: this.options.paper,
+				eraserMode: this.options.eraserMode ?? 'stroke',
 				fingerDraws: this.options.fingerDraws,
 			}),
 			onChange: (patch) => {
 				if (patch.paper !== undefined) {
 					this.setPaper(patch.paper);
 				}
+				if (patch.eraserMode !== undefined) {
+					this.options.eraserMode = patch.eraserMode;
+				}
 				if (
 					patch.brush !== undefined
 					|| patch.colour !== undefined
 					|| patch.size !== undefined
+					|| patch.eraserMode !== undefined
 					|| patch.fingerDraws !== undefined
 				) {
 					this.setOptions(patch);
@@ -656,6 +699,12 @@ export class MdInkOverlay {
 		this.destroyed = true;
 		this.clearHoldSnapTimer();
 		this.clearMagicPauseTimer();
+		if (this.previousPaperBeforeMagic !== null) {
+			this.doc.paper = this.previousPaperBeforeMagic;
+			this.options.paper = this.previousPaperBeforeMagic;
+			this.previousPaperBeforeMagic = null;
+		}
+		this.component.unload();
 		this.scrollerEl.classList.remove('bimo-magic-diary-active');
 		for (const dispose of this.disposers) dispose();
 		this.disposers.length = 0;
@@ -1263,6 +1312,7 @@ export class MdInkOverlay {
 			|| ((tool === 'pen' || tool === 'highlighter') && (event.ctrlKey || event.metaKey));
 		if (tool === 'eraser' || isTransientEraser) {
 			this.transientEraser = isTransientEraser;
+			this.activeEraseSession = { removed: [], added: [] };
 			this.eraseAt(event.clientX, event.clientY);
 			return;
 		}
@@ -1476,6 +1526,20 @@ export class MdInkOverlay {
 			return;
 		}
 
+		if (this.activeEraseSession) {
+			const { removed, added } = this.activeEraseSession;
+			this.activeEraseSession = null;
+			if (removed.length > 0 || added.length > 0) {
+				if (added.length > 0) {
+					this.undoStack.push({ type: 'replace', removed, added });
+				} else {
+					this.undoStack.push({ type: 'remove', strokes: removed });
+				}
+				this.redoStack = [];
+				this.emitChange();
+			}
+		}
+
 		this.transientEraser = false;
 		const tool = this.getTool();
 
@@ -1526,6 +1590,7 @@ export class MdInkOverlay {
 		if (this.activePointerId !== null) {
 			this.layer.releasePointerCapture?.(this.activePointerId);
 		}
+		this.activeEraseSession = null;
 		this.transientEraser = false;
 		this.activeStroke = null;
 		this.livePath.setAttribute('d', '');
@@ -1570,11 +1635,10 @@ export class MdInkOverlay {
 
 	private eraseAt(clientX: number, clientY: number): void {
 		const radius = this.options.eraserRadius;
+		const isPixel = this.options.eraserMode === 'pixel';
 		const removed: MdInkStroke[] = [];
+		const added: MdInkStroke[] = [];
 
-		// Read layout once. This runs on every pointermove while the eraser is
-		// down, and the previous shape asked for the origin and the line top once
-		// per stroke — two forced reflows per stroke, per event.
 		const origin = this.contentOrigin();
 		const tops = new Map<number, number>();
 
@@ -1587,24 +1651,83 @@ export class MdInkOverlay {
 				tops.set(lineNumber, top);
 			}
 
-			const closed = this.strokeLocalPoints(stroke);
-			let hit = false;
-			for (const [x, y] of closed) {
-				const screenX = origin.x + x + stroke.offset.x;
-				const screenY = origin.y + top + y + stroke.offset.y;
-				if (Math.hypot(screenX - clientX, screenY - clientY) <= radius) {
-					hit = true;
-					break;
+			if (!isPixel) {
+				const closed = this.strokeLocalPoints(stroke);
+				let hit = false;
+				for (const [x, y] of closed) {
+					const screenX = origin.x + x + stroke.offset.x;
+					const screenY = origin.y + top + y + stroke.offset.y;
+					if (Math.hypot(screenX - clientX, screenY - clientY) <= radius) {
+						hit = true;
+						break;
+					}
+				}
+				if (hit) removed.push(stroke);
+			} else {
+				const rawPoints = stroke.points;
+				let anyHit = false;
+				const hitFlags = rawPoints.map(([x, y]) => {
+					const screenX = origin.x + x + stroke.offset.x;
+					const screenY = origin.y + top + y + stroke.offset.y;
+					const isHit = Math.hypot(screenX - clientX, screenY - clientY) <= radius;
+					if (isHit) anyHit = true;
+					return isHit;
+				});
+
+				if (!anyHit) continue;
+
+				removed.push(stroke);
+				const runs: InkPoint[][] = [];
+				let currentRun: InkPoint[] = [];
+
+				for (let i = 0; i < rawPoints.length; i++) {
+					if (!hitFlags[i]) {
+						currentRun.push(rawPoints[i]);
+					} else {
+						if (currentRun.length > 0) {
+							runs.push(currentRun);
+							currentRun = [];
+						}
+					}
+				}
+				if (currentRun.length > 0) {
+					runs.push(currentRun);
+				}
+
+				for (const run of runs) {
+					if (run.length >= 1) {
+						added.push({
+							id: newStrokeId(),
+							points: run,
+							style: { ...stroke.style },
+							anchor: { ...stroke.anchor },
+							offset: { ...stroke.offset },
+							createdAt: Date.now(),
+						});
+					}
 				}
 			}
-			if (hit) removed.push(stroke);
 		}
 
-		if (removed.length === 0) return;
+		if (removed.length === 0 && added.length === 0) return;
 		const removedIds = new Set(removed.map((s) => s.id));
 		this.doc.strokes = this.doc.strokes.filter((s) => !removedIds.has(s.id));
-		this.undoStack.push({ type: 'remove', strokes: removed });
-		this.redoStack = [];
+		if (added.length > 0) {
+			this.doc.strokes.push(...added);
+		}
+
+		if (this.activeEraseSession) {
+			this.activeEraseSession.removed.push(...removed);
+			this.activeEraseSession.added.push(...added);
+		} else {
+			if (added.length > 0) {
+				this.undoStack.push({ type: 'replace', removed, added });
+			} else {
+				this.undoStack.push({ type: 'remove', strokes: removed });
+			}
+			this.redoStack = [];
+		}
+
 		this.emitChange();
 		this.requestRender();
 	}
@@ -1727,9 +1850,11 @@ export class MdInkOverlay {
 		const centerX = (bounds.minX + bounds.maxX) / 2;
 		const barWidth = 240;
 		const clampedLeft = Math.max(8, Math.min(centerX - barWidth / 2, Math.max(8, canvasWidth - barWidth - 8)));
-		const top = bounds.minY > 48 ? bounds.minY - 42 : bounds.maxY + 12;
+		const minTop = this.magicDiaryMode ? 54 : 10;
+		const rawTop = bounds.minY > 52 ? bounds.minY - 42 : bounds.maxY + 12;
+		const safeTop = Math.max(minTop, Math.round(rawTop));
 		bar.style.left = `${Math.round(clampedLeft)}px`;
-		bar.style.top = `${Math.round(top)}px`;
+		bar.style.top = `${safeTop}px`;
 	}
 
 	///////////////////////////
@@ -1873,6 +1998,18 @@ export class MdInkOverlay {
 			} else {
 				const ids = new Set(entry.strokes.map((s) => s.id));
 				this.doc.strokes = this.doc.strokes.filter((s) => !ids.has(s.id));
+			}
+			return;
+		}
+		if (entry.type === 'replace') {
+			if (direction === 'undo') {
+				const addedIds = new Set(entry.added.map((s) => s.id));
+				this.doc.strokes = this.doc.strokes.filter((s) => !addedIds.has(s.id));
+				this.doc.strokes.push(...entry.removed);
+			} else {
+				const removedIds = new Set(entry.removed.map((s) => s.id));
+				this.doc.strokes = this.doc.strokes.filter((s) => !removedIds.has(s.id));
+				this.doc.strokes.push(...entry.added);
 			}
 			return;
 		}
@@ -2130,6 +2267,7 @@ export class MdInkOverlay {
 				this.setTool('pen');
 			}
 			if (this.options.paper === 'none') {
+				this.previousPaperBeforeMagic = 'none';
 				this.setPaper('ruled');
 			}
 			if (this.magicStatusEl) {
@@ -2142,6 +2280,10 @@ export class MdInkOverlay {
 			this.clearMagicPauseTimer();
 			this.magicPendingStrokeIds.clear();
 			this.magicReadingStrokeIds.clear();
+			if (this.previousPaperBeforeMagic !== null) {
+				this.setPaper(this.previousPaperBeforeMagic);
+				this.previousPaperBeforeMagic = null;
+			}
 			if (!opts?.silent) {
 				new Notice(t('Magic Diary Page closed.'));
 			}
@@ -2201,6 +2343,8 @@ export class MdInkOverlay {
 				svg,
 				rawSettings: this.options.getAiSettings?.(),
 				history: this.magicHistory,
+				preset: this.options.magicPreset,
+				customPrompt: this.options.magicCustomPrompt,
 			});
 			if (this.destroyed) return;
 
@@ -2307,15 +2451,43 @@ export class MdInkOverlay {
 		const chars = Array.from(reply);
 		let idx = 0;
 		const stepMs = Math.max(12, Math.min(32, Math.floor(900 / Math.max(chars.length, 1))));
+
+		const finishReveal = () => {
+			if (this.destroyed || !card.isConnected) return;
+			this.renderReplyMarkdown(bodyEl, reply);
+		};
+
 		const tick = () => {
 			if (this.destroyed || !card.isConnected) return;
 			idx = Math.min(chars.length, idx + 1);
 			bodyEl.textContent = chars.slice(0, idx).join('');
 			if (idx < chars.length) {
 				window.setTimeout(tick, stepMs);
+			} else {
+				finishReveal();
 			}
 		};
+
+		card.addEventListener('click', (e) => {
+			if (idx < chars.length) {
+				e.preventDefault();
+				e.stopPropagation();
+				idx = chars.length;
+				finishReveal();
+			}
+		});
+
 		tick();
+	}
+
+	private renderReplyMarkdown(targetEl: HTMLElement, markdown: string): void {
+		try {
+			const app = (this.view as any)?.app ?? getGlobals().plugin.app;
+			targetEl.empty();
+			void MarkdownRenderer.render(app, markdown, targetEl, '', this.component);
+		} catch {
+			targetEl.textContent = markdown;
+		}
 	}
 
 	clearMagicReplies(): void {

@@ -371,6 +371,19 @@ export class MySettingsTab extends PluginSettingTab {
 				}));
 
 		new Setting(container)
+			.setName(t('Eraser mode'))
+			.setDesc(t('Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.'))
+			.addDropdown((dropdown) => dropdown
+				.addOption('stroke', t('Object eraser'))
+				.addOption('pixel', t('Partial eraser'))
+				.setValue(plugin.settings.mdInkEraserMode)
+				.onChange(async (value) => {
+					plugin.settings.mdInkEraserMode = value as 'stroke' | 'pixel';
+					plugin.mdInk.refreshOptions({ eraserMode: plugin.settings.mdInkEraserMode });
+					await plugin.saveSettings();
+				}));
+
+		new Setting(container)
 			.setName(t('Eraser radius'))
 			.setDesc(t('How close the eraser has to come to a stroke, in pixels. Larger is forgiving on a tablet, clumsy with a mouse.'))
 			.addSlider((slider: SliderComponent) => slider
@@ -393,6 +406,52 @@ export class MySettingsTab extends PluginSettingTab {
 					plugin.mdInk.refreshOptions({ shapeSnap: value });
 					await plugin.saveSettings();
 				}));
+
+		const magicCard = container.createDiv('bimo_settings-card');
+		magicCard.createEl('h4', { text: `✦ ${t('Magic Diary Page')}` });
+		magicCard.createEl('p', {
+			cls: 'setting-item-description',
+			text: t('You write a line, AI writes a line. Inspired by magical parchment and enchanted diaries. Choose from preset response styles or tailor your own system prompt.'),
+		});
+
+		new Setting(magicCard)
+			.setName(t('Response style'))
+			.setDesc(t('Choose the persona and purpose of the Magic Diary Page.'))
+			.addDropdown((dropdown) => {
+				dropdown
+					.addOption('chat', t('Companion'))
+					.addOption('explain', t('Explain & Teach'))
+					.addOption('brainstorm', t('Brainstorm'))
+					.addOption('solver', t('Problem Solver'))
+					.addOption('custom', t('Custom'))
+					.setValue(plugin.settings.magicDiaryPreset)
+					.onChange(async (value) => {
+						plugin.settings.magicDiaryPreset = value as typeof plugin.settings.magicDiaryPreset;
+						plugin.mdInk.refreshOptions({ magicPreset: plugin.settings.magicDiaryPreset });
+						await plugin.saveSettings();
+						promptSetting.settingEl.style.display =
+							plugin.settings.magicDiaryPreset === 'custom' ? 'block' : 'none';
+					});
+			});
+
+		const promptSetting = new Setting(magicCard)
+			.setName(t('Custom prompt'))
+			.setDesc(t('System prompt given to the AI when reading your handwriting on Magic Diary Pages.'))
+			.addTextArea((text) => {
+				text
+					.setPlaceholder(t('Write custom instructions for how the enchanted page should answer your handwritten ink…'))
+					.setValue(plugin.settings.magicDiaryCustomPrompt)
+					.onChange(async (value) => {
+						plugin.settings.magicDiaryCustomPrompt = value;
+						plugin.mdInk.refreshOptions({ magicCustomPrompt: value });
+						await plugin.saveSettings();
+					});
+				text.inputEl.rows = 4;
+				text.inputEl.style.width = '100%';
+			});
+
+		promptSetting.settingEl.style.display =
+			plugin.settings.magicDiaryPreset === 'custom' ? 'block' : 'none';
 
 		container.createEl('p', {
 			cls: 'bimo_settings-pane__note',

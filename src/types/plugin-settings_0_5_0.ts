@@ -105,10 +105,16 @@ export interface PluginSettings_0_5_0 extends PluginSettings_0_4_0 {
 	mdInkMouseDrawingMigrated?: boolean,
 	/** Paper texture drawn under the ink: none, ruled, grid or dots. */
 	mdInkPaper: 'none' | 'ruled' | 'grid' | 'dots',
+	/** Eraser mode: stroke (整笔擦除) or pixel (局部/像素擦除). */
+	mdInkEraserMode: 'stroke' | 'pixel',
 	/** Eraser hit radius in CSS px. */
 	mdInkEraserRadius: number,
 	/** Straighten near-straight strokes into lines and near-closed loops into rectangles. */
 	mdInkShapeSnap: boolean,
+	/** Magic diary response style preset. */
+	magicDiaryPreset: 'chat' | 'explain' | 'brainstorm' | 'solver' | 'custom',
+	/** Optional user-defined system prompt for magic diary page turns. */
+	magicDiaryCustomPrompt: string,
 }
 
 export const DEFAULT_PLUGIN_SETTINGS_0_5_0: PluginSettings_0_5_0 = {
@@ -175,6 +181,9 @@ export const DEFAULT_PLUGIN_SETTINGS_0_5_0: PluginSettings_0_5_0 = {
 	// the scroll gesture and the stylus is the pen.
 	mdInkFingerDraws: false,
 	mdInkPaper: 'none',
+	mdInkEraserMode: 'stroke',
 	mdInkEraserRadius: 14,
 	mdInkShapeSnap: true,
+	magicDiaryPreset: 'chat',
+	magicDiaryCustomPrompt: '',
 }

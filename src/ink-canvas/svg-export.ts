@@ -118,7 +118,10 @@ function buildStrokePathMarkup(
 	const opacityAttr = typeof opacity === 'number' && opacity < 1
 		? ` fill-opacity="${Math.max(0, Math.min(1, opacity)).toFixed(3)}"`
 		: '';
-	const pathAttrs = `d="${d}" fill="${resolvedStrokeColour(stroke)}"${opacityAttr} class="${INK_SVG_STROKE_PATH_CLASS}"`;
+	const color = resolvedStrokeColour(stroke);
+	const isCustom = Boolean(stroke.style.color && stroke.style.color !== 'currentColor' && stroke.style.color !== DEFAULT_CONTENT_COLOUR_PRIMARY_STROKE);
+	const strokeClass = isCustom ? 'ink-type-stroke ink-color-custom' : INK_SVG_STROKE_PATH_CLASS;
+	const pathAttrs = `d="${d}" fill="${color}"${opacityAttr} class="${strokeClass}"`;
 	const hasOffset = offsetX !== 0 || offsetY !== 0;
 	if (hasOffset) {
 		return `<g transform="translate(${offsetX},${offsetY})"><path ${pathAttrs} /></g>\n`;

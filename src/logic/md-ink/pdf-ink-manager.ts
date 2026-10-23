@@ -435,6 +435,7 @@ export class PdfInkManager {
 				colour: this.plugin.settings.mdInkColour,
 				mouseDrawing: this.plugin.settings.mdInkMouseDrawing,
 				fingerDraws: this.plugin.settings.mdInkFingerDraws,
+				eraserMode: this.plugin.settings.mdInkEraserMode,
 				eraserRadius: this.plugin.settings.mdInkEraserRadius,
 				shapeSnap: this.plugin.settings.mdInkShapeSnap,
 				tool: this.plugin.mdInk.tool,
@@ -466,12 +467,14 @@ export class PdfInkManager {
 				brush: this.plugin.settings.mdInkBrush,
 				colour: this.plugin.settings.mdInkColour,
 				size: this.plugin.settings.mdInkSize,
+				eraserMode: this.plugin.settings.mdInkEraserMode,
 				fingerDraws: this.plugin.settings.mdInkFingerDraws,
 			}),
 			(patch) => {
 				if (patch.brush !== undefined) this.plugin.settings.mdInkBrush = patch.brush;
 				if (patch.colour !== undefined) this.plugin.settings.mdInkColour = patch.colour;
 				if (patch.size !== undefined) this.plugin.settings.mdInkSize = patch.size;
+				if (patch.eraserMode !== undefined) this.plugin.settings.mdInkEraserMode = patch.eraserMode;
 				if (patch.fingerDraws !== undefined) this.plugin.settings.mdInkFingerDraws = patch.fingerDraws;
 				this.plugin.mdInk.refreshOptions(patch);
 				void this.plugin.saveSettings();

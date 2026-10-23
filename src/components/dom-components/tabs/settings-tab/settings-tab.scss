@@ -429,3 +429,34 @@ input.ddc_ink_line-height-input {
 	color: var(--text-muted);
 	max-width: 46em;
 }
+
+.bimo_settings-card {
+	margin: 1.4em 0 1em;
+	padding: 1.1em 1.25em;
+	border-radius: var(--radius-m);
+	background: color-mix(in srgb, var(--background-secondary) 85%, transparent);
+	border: 1px solid var(--background-modifier-border);
+	box-shadow: var(--shadow-s);
+
+	h4 {
+		margin-top: 0;
+		margin-bottom: 0.35em;
+		color: var(--text-normal);
+		font-weight: 600;
+	}
+
+	.setting-item-description {
+		margin-bottom: 0.85em;
+		color: var(--text-muted);
+		font-size: 0.88em;
+	}
+
+	.setting-item {
+		border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+		padding: 0.75em 0;
+
+		&:first-of-type {
+			border-top: none;
+		}
+	}
+}

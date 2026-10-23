@@ -8,9 +8,12 @@ import { UndoManager } from 'src/ink-canvas/undo-manager';
 import {
 	buildMagicDiaryNoteContent,
 	hasMagicDiaryFrontmatter,
+	MAGIC_DIARY_PRESETS,
 	parseMagicDiaryResponse,
 	requestMagicDiaryTurn,
+	resolveMagicDiarySystemPrompt,
 } from 'src/logic/ai/magic-diary';
+import { renderStrokesToSvg } from 'src/ink-canvas/svg-export';
 import { MdInkOverlay } from 'src/logic/md-ink/md-ink-overlay';
 import { PdfInkOverlay } from 'src/logic/md-ink/pdf-ink-overlay';
 import { createEmptyPdfInkDocument } from 'src/logic/md-ink/pdf-ink-types';
@@ -368,5 +371,246 @@ describe('PillStylePopover fingerDraws toggle & PdfInkOverlay selection mutation
 
 		overlay.destroy();
 		dom.remove();
+	});
+
+	test('preserves note paper style and restores previous paper on magic diary deactivation', () => {
+		const dom = document.createElement('div');
+		const scroller = document.createElement('div');
+		scroller.className = 'cm-scroller';
+		const content = document.createElement('div');
+		content.className = 'cm-content';
+		scroller.appendChild(content);
+		dom.appendChild(scroller);
+		document.body.appendChild(dom);
+
+		const fakeView = {
+			dom,
+			scrollDOM: scroller,
+			contentDOM: content,
+			state: {
+				doc: {
+					lines: 1,
+					toString: () => 'Normal note content',
+					line: () => ({ number: 1, from: 0, text: 'Normal note content' }),
+					lineAt: () => ({ number: 1, from: 0, text: 'Normal note content' }),
+				},
+				selection: { main: { head: 0 } },
+			},
+			posAtCoords: () => 0,
+			coordsAtPos: () => ({ top: 0 }),
+			lineBlockAt: () => ({ top: 0 }),
+			dispatch: jest.fn(),
+		};
+
+		const mdDoc = createEmptyMdInkDocument('normal.md');
+		mdDoc.paper = 'none';
+
+		const overlay = new MdInkOverlay(
+			fakeView as never,
+			'normal.md',
+			{
+				brush: 'pen',
+				size: 4,
+				colour: '#111111',
+				mouseDrawing: true,
+				fingerDraws: false,
+				paper: 'none',
+				eraserRadius: 14,
+				shapeSnap: true,
+			},
+			mdDoc,
+		);
+
+		expect(overlay.getDocument().paper).toBe('none');
+
+		// Awakening magic diary switches paper to ruled for parchment feel
+		overlay.setMagicDiaryMode(true);
+		expect(overlay.isMagicDiaryMode()).toBe(true);
+		expect(overlay.getDocument().paper).toBe('ruled');
+
+		// Closing magic diary restores original paper ('none')
+		overlay.setMagicDiaryMode(false);
+		expect(overlay.isMagicDiaryMode()).toBe(false);
+		expect(overlay.getDocument().paper).toBe('none');
+
+		overlay.destroy();
+		dom.remove();
+	});
+
+	test('dual eraser mode in MdInkOverlay: stroke mode removes whole stroke, pixel mode cuts stroke', () => {
+		const dom = document.createElement('div');
+		const scroller = document.createElement('div');
+		scroller.className = 'cm-scroller';
+		const content = document.createElement('div');
+		content.className = 'cm-content';
+		scroller.appendChild(content);
+		dom.appendChild(scroller);
+		document.body.appendChild(dom);
+
+		const fakeView = {
+			dom,
+			scrollDOM: scroller,
+			contentDOM: content,
+			state: {
+				doc: {
+					lines: 1,
+					toString: () => 'Test line',
+					line: () => ({ number: 1, from: 0, text: 'Test line' }),
+					lineAt: () => ({ number: 1, from: 0, text: 'Test line' }),
+				},
+				selection: { main: { head: 0 } },
+			},
+			posAtCoords: () => 0,
+			coordsAtPos: () => ({ top: 0 }),
+			lineBlockAt: () => ({ top: 0 }),
+			dispatch: jest.fn(),
+		};
+
+		// 1. Test Object / Stroke Eraser Mode
+		const docStroke = createEmptyMdInkDocument('stroke-mode.md');
+		docStroke.strokes.push({
+			id: 's1',
+			points: [
+				[10, 10, 0.5],
+				[20, 20, 0.5],
+				[30, 30, 0.5],
+			],
+			style: { ...DEFAULT_STROKE_STYLE, color: '#111111' },
+			anchor: { line: 1, lineText: 'Test line' },
+			offset: { x: 0, y: 0 },
+			createdAt: Date.now(),
+		});
+
+		const overlayStroke = new MdInkOverlay(
+			fakeView as never,
+			'stroke-mode.md',
+			{
+				brush: 'pen',
+				size: 4,
+				colour: '#111111',
+				mouseDrawing: true,
+				fingerDraws: false,
+				paper: 'none',
+				eraserMode: 'stroke',
+				eraserRadius: 10,
+				shapeSnap: false,
+			},
+			docStroke,
+		);
+
+		// Erase at point (20, 20) in stroke mode -> deletes entire stroke s1
+		(overlayStroke as unknown as { eraseAt: (x: number, y: number) => void }).eraseAt(20, 20);
+		expect(overlayStroke.getDocument().strokes).toHaveLength(0);
+		overlayStroke.undo();
+		expect(overlayStroke.getDocument().strokes).toHaveLength(1);
+		overlayStroke.destroy();
+
+		// 2. Test Pixel / Partial Eraser Mode
+		const docPixel = createEmptyMdInkDocument('pixel-mode.md');
+		docPixel.strokes.push({
+			id: 'p1',
+			points: [
+				[10, 10, 0.5],
+				[12, 10, 0.5],
+				[50, 50, 0.5], // hit point in middle
+				[51, 50, 0.5], // hit point in middle
+				[90, 90, 0.5],
+				[92, 90, 0.5],
+			],
+			style: { ...DEFAULT_STROKE_STYLE, color: '#e03131' },
+			anchor: { line: 1, lineText: 'Test line' },
+			offset: { x: 0, y: 0 },
+			createdAt: Date.now(),
+		});
+
+		const overlayPixel = new MdInkOverlay(
+			fakeView as never,
+			'pixel-mode.md',
+			{
+				brush: 'pen',
+				size: 4,
+				colour: '#e03131',
+				mouseDrawing: true,
+				fingerDraws: false,
+				paper: 'none',
+				eraserMode: 'pixel',
+				eraserRadius: 8,
+				shapeSnap: false,
+			},
+			docPixel,
+		);
+
+		// Erase at (50, 50) with radius 8 -> cuts out the middle points, leaving 2 sub-strokes!
+		(overlayPixel as unknown as { eraseAt: (x: number, y: number) => void }).eraseAt(50, 50);
+		const resultStrokes = overlayPixel.getDocument().strokes;
+		expect(resultStrokes).toHaveLength(2);
+		expect(resultStrokes[0].style.color).toBe('#e03131');
+		expect(resultStrokes[1].style.color).toBe('#e03131');
+
+		// Undo restores the single unbroken original stroke
+		overlayPixel.undo();
+		expect(overlayPixel.getDocument().strokes).toHaveLength(1);
+		expect(overlayPixel.getDocument().strokes[0].id).toBe('p1');
+
+		// Redo cuts it again
+		overlayPixel.redo();
+		expect(overlayPixel.getDocument().strokes).toHaveLength(2);
+
+		overlayPixel.destroy();
+		dom.remove();
+	});
+});
+
+describe('Magic Diary Presets & Prompt Customization', () => {
+	test('defines rich preset styles for companion, explain, brainstorm, and solver', () => {
+		expect(MAGIC_DIARY_PRESETS.chat).toBeDefined();
+		expect(MAGIC_DIARY_PRESETS.explain).toBeDefined();
+		expect(MAGIC_DIARY_PRESETS.brainstorm).toBeDefined();
+		expect(MAGIC_DIARY_PRESETS.solver).toBeDefined();
+		expect(MAGIC_DIARY_PRESETS.custom).toBeDefined();
+	});
+
+	test('resolveMagicDiarySystemPrompt applies preset or custom prompt with format envelope', () => {
+		const chatPrompt = resolveMagicDiarySystemPrompt('chat');
+		expect(chatPrompt).toContain('Tom Riddle');
+		expect(chatPrompt).toContain('HEARD:');
+		expect(chatPrompt).toContain('REPLY:');
+
+		const explainPrompt = resolveMagicDiarySystemPrompt('explain');
+		expect(explainPrompt).toContain('pedagogical scholar');
+
+		const solverPrompt = resolveMagicDiarySystemPrompt('solver');
+		expect(solverPrompt).toContain('academic tutor');
+
+		const customPrompt = resolveMagicDiarySystemPrompt('custom', 'You are Sherlock Holmes inspecting notes.');
+		expect(customPrompt).toContain('Sherlock Holmes');
+		expect(customPrompt).toContain('HEARD:');
+	});
+});
+
+describe('Embed SVG stroke color preservation', () => {
+	test('marks custom coloured strokes with ink-color-custom to avoid theme overwrite', () => {
+		const redStroke: InkStroke = {
+			id: 'red_1',
+			points: [[0, 0, 0.5], [10, 10, 0.5]],
+			style: { ...DEFAULT_STROKE_STYLE, color: '#e03131' },
+			offset: { x: 0, y: 0 },
+		};
+		const defaultStroke: InkStroke = {
+			id: 'def_1',
+			points: [[20, 20, 0.5], [30, 30, 0.5]],
+			style: { ...DEFAULT_STROKE_STYLE, color: 'currentColor' },
+			offset: { x: 0, y: 0 },
+		};
+
+		const snapshot = {
+			formatVersion: 1,
+			strokes: [redStroke, defaultStroke],
+		};
+
+		const svgMarkup = renderStrokesToSvg([redStroke, defaultStroke], snapshot as never);
+		expect(svgMarkup).toContain('fill="#e03131"');
+		expect(svgMarkup).toContain('ink-color-custom');
+		expect(svgMarkup).toContain('ink-color-primary');
 	});
 });

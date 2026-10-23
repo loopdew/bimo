@@ -112,6 +112,17 @@ module.exports = {
     addToggle(cb) { cb({ setValue: () => this, onChange: () => this }); return this; }
     addButton(cb) { cb({ setButtonText: () => this, setClass: () => this, setWarning: () => this, setCta: () => this, onClick: () => this }); return this; }
   },
+  Component: class {
+    load() {}
+    unload() {}
+    addChild() {}
+    removeChild() {}
+  },
+  MarkdownRenderer: {
+    render: async (app, markdown, el) => {
+      if (el) el.innerHTML = `<p>${markdown}</p>`;
+    },
+  },
 };
 
 

@@ -7,13 +7,14 @@ import {
 	nearestBrushSizeStep,
 	type InkBrushKind,
 } from 'src/ink-canvas/brush-presets';
-import type { MdInkPaper } from './types';
+import type { MdInkEraserMode, MdInkPaper } from './types';
 
 export interface PillStyleState {
 	brush: InkBrushKind;
 	colour: string;
 	size: number;
 	paper?: MdInkPaper;
+	eraserMode?: MdInkEraserMode;
 	fingerDraws?: boolean;
 }
 
@@ -22,6 +23,7 @@ export interface PillStylePatch {
 	colour?: string;
 	size?: number;
 	paper?: MdInkPaper;
+	eraserMode?: MdInkEraserMode;
 	fingerDraws?: boolean;
 }
 
@@ -184,7 +186,39 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 		popover.appendChild(paperSection);
 	}
 
-	// 5. Touch input / Finger drawing quick toggle (for phones & tablets)
+	// 5. Eraser mode (Object / Stroke vs Pixel / Partial)
+	const eraserSection = document.createElement('div');
+	eraserSection.className = 'bimo-md-ink-popover__section';
+	const eraserLabel = document.createElement('div');
+	eraserLabel.className = 'bimo-md-ink-popover__label';
+	eraserLabel.textContent = t('Eraser mode');
+	const eraserRow = document.createElement('div');
+	eraserRow.className = 'bimo-md-ink-popover__chips';
+
+	const ERASER_MODE_ITEMS: ReadonlyArray<{ mode: MdInkEraserMode; labelKey: string }> = [
+		{ mode: 'stroke', labelKey: 'Object eraser' },
+		{ mode: 'pixel', labelKey: 'Partial eraser' },
+	];
+
+	for (const item of ERASER_MODE_ITEMS) {
+		const chip = document.createElement('button');
+		chip.type = 'button';
+		chip.className = 'bimo-md-ink-popover__chip';
+		chip.dataset.mdInkEraserMode = item.mode;
+		chip.textContent = t(item.labelKey);
+		chip.title = t(item.labelKey);
+		chip.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			onChange({ eraserMode: item.mode });
+			sync();
+		});
+		eraserRow.appendChild(chip);
+	}
+	eraserSection.append(eraserLabel, eraserRow);
+	popover.appendChild(eraserSection);
+
+	// 6. Touch input / Finger drawing quick toggle (for phones & tablets)
 	const touchSection = document.createElement('div');
 	touchSection.className = 'bimo-md-ink-popover__section bimo-md-ink-popover__section--inline';
 	const fingerChip = document.createElement('button');
@@ -236,6 +270,11 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 		if (showPaper && state.paper) {
 			for (const el of Array.from(popover.querySelectorAll<HTMLButtonElement>('[data-md-ink-paper]'))) {
 				el.classList.toggle('is-active', el.dataset.mdInkPaper === state.paper);
+			}
+		}
+		if (state.eraserMode) {
+			for (const el of Array.from(popover.querySelectorAll<HTMLButtonElement>('[data-md-ink-eraser-mode]'))) {
+				el.classList.toggle('is-active', el.dataset.mdInkEraserMode === state.eraserMode);
 			}
 		}
 		if (state.fingerDraws !== undefined) {

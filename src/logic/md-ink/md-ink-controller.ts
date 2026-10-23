@@ -37,6 +37,7 @@ export class MdInkController {
 			colour?: string;
 			mouseDrawing?: boolean;
 			fingerDraws?: boolean;
+			eraserMode?: 'stroke' | 'pixel';
 			eraserRadius?: number;
 			shapeSnap?: boolean;
 		}) => void;
@@ -169,6 +170,7 @@ export class MdInkController {
 			colour: patch.colour,
 			mouseDrawing: patch.mouseDrawing,
 			fingerDraws: patch.fingerDraws,
+			eraserMode: patch.eraserMode,
 			eraserRadius: patch.eraserRadius,
 			shapeSnap: patch.shapeSnap,
 		});

@@ -14,6 +14,9 @@ import type { InkPoint, InkStrokeStyle } from 'src/ink-canvas/types';
 /** Tools available in the note overlay. Mirrors Handwriting's pill. */
 export type MdInkTool = 'pen' | 'highlighter' | 'eraser' | 'lasso' | 'pan';
 
+/** Eraser mode: stroke (整笔擦除) removes entire strokes, pixel (局部/像素擦除) cuts strokes at hit points. */
+export type MdInkEraserMode = 'stroke' | 'pixel';
+
 /** Paper texture drawn under the ink. */
 export type MdInkPaper = 'none' | 'ruled' | 'grid' | 'dots';
 
