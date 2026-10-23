@@ -256,26 +256,23 @@ export default class InkPlugin extends Plugin {
 				initHandwritingTranscriptionQueue(this);
 			});
 
-			// Intercept clicks on internal Bimo embed links (e.g. bimo.invalid / type=inkWriting / type=inkDrawing)
-			// so Obsidian never invokes external browser opening.
+			// Intercept clicks on internal Bimo embed anchor links (e.g. https://bimo.invalid/embed?type=inkWriting)
+			// so Obsidian never opens an external browser. Only targets genuine HTML <a> elements.
 			this.registerDomEvent(
 				document,
 				'click',
 				(event: MouseEvent) => {
 					const target = event.target as HTMLElement | null;
-					const linkEl = target?.closest('a, .cm-link, [data-href]') as HTMLElement | null;
-					if (!linkEl) return;
-					const href = linkEl.getAttribute('href') || linkEl.getAttribute('data-href') || linkEl.textContent || '';
+					const anchor = target?.closest('a');
+					if (!anchor) return;
+					const href = anchor.getAttribute('href') || '';
 					if (
 						href.includes('bimo.invalid') ||
 						href.includes('type=inkWriting') ||
-						href.includes('type=inkDrawing') ||
-						href.trim() === 'Edit Writing' ||
-						href.trim() === 'Edit Drawing'
+						href.includes('type=inkDrawing')
 					) {
 						event.preventDefault();
 						event.stopPropagation();
-						event.stopImmediatePropagation();
 					}
 				},
 				true,

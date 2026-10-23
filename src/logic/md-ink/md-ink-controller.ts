@@ -112,8 +112,11 @@ export class MdInkController {
 					return;
 				}
 
-				// If starting in the top 140px of the screen or inside view-header/leaf header
-				if (touchStartY < 140 || target?.closest('.view-header, .workspace-leaf-header, .view-actions')) {
+				// Only consider it a top swipe candidate if touch actually started on an app header element
+				// and NOT inside note content / editor lines (so scrolling/typing near top of note is never blocked)
+				const isHeader = !!target?.closest('.view-header, .workspace-leaf-header, .view-actions, .mobile-navbar, .titlebar');
+				const isNoteContent = !!target?.closest('.cm-content, .cm-editor, .cm-scroller, .markdown-reading-view, .pdf-viewer');
+				if (isHeader && !isNoteContent) {
 					isTopSwipeCandidate = true;
 				} else {
 					isTopSwipeCandidate = false;

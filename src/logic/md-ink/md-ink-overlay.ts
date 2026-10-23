@@ -229,7 +229,7 @@ export class MdInkOverlay {
 	private dragStart: { x: number; y: number } | null = null;
 	private dragOrigins = new Map<string, { x: number; y: number }>();
 	private panStart: { scrollTop: number; scrollLeft: number; clientY: number; clientX: number } | null = null;
-	private touchPan: { pointerId: number; startX: number; startY: number; startScrollLeft: number; startScrollTop: number } | null = null;
+	private touchPan: { pointerId: number; startX: number; startY: number; startScrollLeft: number; startScrollTop: number; moved: boolean } | null = null;
 
 	private renderQueued = false;
 	private destroyed = false;
@@ -562,9 +562,15 @@ export class MdInkOverlay {
 				event.stopPropagation();
 				this.stylePopover?.close();
 
-				if (tool === 'eraser' && this.getTool() === 'eraser') {
-					// Clicking eraser while already in eraser mode opens the style popover to adjust radius & mode!
-					this.stylePopover?.open();
+				if (tool === this.getTool()) {
+					if (tool === 'eraser') {
+						this.stylePopover?.open();
+						return;
+					}
+					// Toggling active tool: switch between handwriting and pan/text typing mode!
+					const nextTool: MdInkTool = tool === 'pan' ? 'pen' : 'pan';
+					this.options.onToolSelected?.(nextTool);
+					this.setTool(nextTool);
 					return;
 				}
 
@@ -1280,14 +1286,23 @@ export class MdInkOverlay {
 
 		const touchFilter = (event: TouchEvent) => {
 			if (this.getTool() === 'pan') return;
+			// If already drawing with stylus, drop palm touch immediately
+			if (this.activePointerId !== null) {
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
+			// When finger drawing is OFF (default), do NOT preventDefault!
+			// Fingers strictly scroll and tap to place caret/type naturally.
+			if (!this.options.fingerDraws) {
+				return;
+			}
 			const target = event.target as HTMLElement | null;
 			if (target?.closest('button, select, input, a, .bimo-md-ink-pill, .bimo-magic-diary-banner, .bimo-magic-diary-reply button')) {
 				return;
 			}
+			event.preventDefault();
 			event.stopPropagation();
-			if (!this.options.fingerDraws) {
-				event.preventDefault();
-			}
 		};
 
 		this.layer.addEventListener('pointerdown', down);
@@ -1409,10 +1424,10 @@ export class MdInkOverlay {
 		// When finger drawing is off, fingers strictly pan the canvas instead of triggering
 		// text carets, selections, or keyboard popups in CodeMirror.
 		if (event.pointerType === 'touch' && !this.options.fingerDraws && this.getTool() !== 'lasso') {
-			event.preventDefault();
-			event.stopPropagation();
 			// If already drawing with stylus, drop palm contact completely
 			if (this.activePointerId !== null) {
+				event.preventDefault();
+				event.stopPropagation();
 				return;
 			}
 			const scroller = this.scrollerEl;
@@ -1422,8 +1437,8 @@ export class MdInkOverlay {
 				startY: event.clientY,
 				startScrollLeft: scroller.scrollLeft,
 				startScrollTop: scroller.scrollTop,
+				moved: false,
 			};
-			this.layer.setPointerCapture?.(event.pointerId);
 			return;
 		}
 
@@ -1579,13 +1594,17 @@ export class MdInkOverlay {
 
 	private onPointerMove(event: PointerEvent): void {
 		if (this.touchPan && event.pointerId === this.touchPan.pointerId) {
-			event.preventDefault();
-			event.stopPropagation();
 			const scroller = this.scrollerEl;
 			const dx = event.clientX - this.touchPan.startX;
 			const dy = event.clientY - this.touchPan.startY;
-			scroller.scrollLeft = this.touchPan.startScrollLeft - dx;
-			scroller.scrollTop = this.touchPan.startScrollTop - dy;
+			if (Math.hypot(dx, dy) > 6) {
+				this.touchPan.moved = true;
+				try { this.layer.setPointerCapture?.(event.pointerId); } catch {}
+				scroller.scrollLeft = this.touchPan.startScrollLeft - dx;
+				scroller.scrollTop = this.touchPan.startScrollTop - dy;
+				event.preventDefault();
+				event.stopPropagation();
+			}
 			return;
 		}
 
@@ -1669,10 +1688,24 @@ export class MdInkOverlay {
 
 	private onPointerUp(event: PointerEvent): void {
 		if (this.touchPan && event.pointerId === this.touchPan.pointerId) {
-			event.preventDefault();
-			event.stopPropagation();
+			const wasMoved = this.touchPan.moved;
 			try { this.layer.releasePointerCapture?.(event.pointerId); } catch {}
 			this.touchPan = null;
+			if (wasMoved) {
+				event.preventDefault();
+				event.stopPropagation();
+			} else {
+				// Finger tap: forward click/focus to underlying element so caret positioning and typing work!
+				this.layer.style.pointerEvents = 'none';
+				const under = document.elementFromPoint(event.clientX, event.clientY);
+				this.layer.style.pointerEvents = '';
+				if (under && !under.closest('.bimo-md-ink-pill')) {
+					if (under instanceof HTMLElement) {
+						under.click?.();
+						under.focus?.();
+					}
+				}
+			}
 			return;
 		}
 
