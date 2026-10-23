@@ -1,307 +1,68 @@
-.ddc_ink_section {
-    margin-bottom: 2em;
-}
-
-.ddc_ink_bare-setting {
-    background: none;
-    border-top: none;
-    padding-inline: 0;
-
-    &--left .setting-item-control {
-        justify-content: flex-start;
-    }
-
-    &--no-bottom-margin {
-        margin-block-end: 0;
-    }
-}
-
-.ddc_ink_section details {
-    overflow: hidden;
-    
-    border-color: rgba(var(--callout-color), var(--callout-border-opacity));
-    border-width: var(--callout-border-width);
-    border-radius: var(--callout-radius);
-    background-color: rgba(var(--callout-color), 0.05);
-    
-    padding-block-start: 0.4em;
-    padding-block-end: 0.4em;
-    padding-inline: 1em;
-
-    --callout-color: 255,255,255;
-    &.warning {
-        --callout-color: var(--callout-warning);
-    }
-
-    summary {
-        font-weight: 600;
-    }
-}
-
-.ddc_ink_stroke-input-detected-paragraph {
-    margin: 0.4em 0 0.15em;
-    font-size: 0.9em;
-    line-height: 1.45;
-    color: var(--text-muted);
-}
-
-.ddc_ink_stroke-input-detected-value {
-    color: var(--text-normal);
-    font-weight: 600;
-}
-
-.ddc_ink_input-medium {
-    .setting-item-control {
-        input {
-            width: 100%;
-        }
-    }
-}
-
-.ddc_ink_button-set {
-    flex-wrap: wrap;
-    row-gap: 0.5em;
-
-    .setting-item-info {
-        width: 100%;
-    }
-
-    .setting-item-control {
-        gap: 2px;
-        flex-wrap: wrap;
-        padding-bottom: 0.9em;
-
-        button {
-            flex-grow: 1;
-            flex-shrink: 1;
-        }
-
-        .ddc_ink_middle {
-            border-top-left-radius: 0;
-            border-bottom-left-radius: 0;
-            border-top-right-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-
-        .ddc_ink_left-most {
-            border-top-right-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-        .ddc_ink_right-most {
-            border-top-left-radius: 0;
-            border-bottom-left-radius: 0;
-        }
-
-        .mod-cta:disabled {
-            box-shadow: inset 1px 1px 3px 0.5px rgba(0, 0, 0, 0.6);
-            pointer-events: none;
-        }
-    }
-}
-
-input.ddc_ink_line-height-input {
-    width: 4em;
-}
-
 /* ==========================================================================
-   笔墨 settings shell — brand header, pane navigation, card surfaces.
+   笔墨 Settings Tab — 100% Native Obsidian UI
    ========================================================================== */
 
 .bimo_settings {
 	padding-bottom: 3em;
 }
 
-.bimo_settings-header {
+/* 顶部原生风格分段选择标签栏 */
+.bimo_settings-tabs {
 	display: flex;
-	align-items: flex-start;
-	justify-content: space-between;
-	gap: 1em;
-	flex-wrap: wrap;
-
-	padding: 1.2em 1.3em;
-	margin-bottom: 1.2em;
-
-	border-radius: var(--radius-l);
-	border: 1px solid var(--background-modifier-border);
-	background:
-		linear-gradient(
-			135deg,
-			color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary)) 0%,
-			var(--background-primary) 65%
-		);
-	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
-}
-
-.bimo_settings-header__identity {
-	display: flex;
-	flex-direction: column;
-	gap: 0.25em;
-	min-width: 0;
-}
-
-.bimo_settings-header__name {
-	margin: 0;
-	font-size: 1.5em;
-	font-weight: 700;
-	letter-spacing: 0.08em;
-	line-height: 1.2;
-	color: var(--text-normal);
-}
-
-.bimo_settings-header__tagline {
-	font-size: 0.84em;
-	color: var(--text-muted);
-	line-height: 1.45;
-}
-
-.bimo_settings-header__badges {
-	display: flex;
-	align-items: center;
-	gap: 0.5em;
-	flex-wrap: wrap;
-}
-
-.bimo_settings-badge {
-	padding: 0.2em 0.7em;
-	border-radius: 1em;
-	font-size: 0.75em;
-	font-weight: 500;
-	line-height: 1.5;
-	white-space: nowrap;
-	color: var(--text-muted);
-	background: var(--background-modifier-hover);
-	border: 1px solid var(--background-modifier-border);
-}
-
-.bimo_settings-badge--ok {
-	color: var(--text-success, #2f9e44);
-	border-color: color-mix(in srgb, var(--text-success, #2f9e44) 35%, transparent);
-	background: color-mix(in srgb, var(--text-success, #2f9e44) 10%, transparent);
-}
-
-.bimo_settings-badge--idle {
-	color: var(--text-faint);
-}
-
-.bimo_settings-nav {
-	position: sticky;
-	top: 0;
-	z-index: 5;
-
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.4em;
-
-	padding: 0.6em 0;
-	margin-bottom: 1.2em;
-
-	background: var(--background-primary);
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.bimo_settings-nav__item {
-	padding: 0.45em 1em;
-	font-size: 0.86em;
-	font-weight: 500;
-	color: var(--text-muted);
-	background: var(--background-secondary);
+	background: var(--background-modifier-form-field);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
-	box-shadow: none;
+	padding: 3px;
+	margin: 0.8em 0 1.2em;
+	gap: 4px;
+}
+
+.bimo_settings-tab-button {
+	flex: 1;
+	text-align: center;
+	background: transparent;
+	border: none;
+	border-radius: var(--radius-s);
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-medium);
+	padding: 6px 12px;
 	cursor: pointer;
-	transition: all 0.15s ease-in-out;
+	box-shadow: none;
+	transition: background 0.15s ease, color 0.15s ease;
 
 	&:hover {
 		color: var(--text-normal);
 		background: var(--background-modifier-hover);
-		border-color: var(--background-modifier-border-focus);
 	}
 
-	&.bimo_settings-nav__item--active {
-		color: var(--text-on-accent);
-		background: var(--interactive-accent);
-		border-color: var(--interactive-accent);
-		font-weight: 600;
+	&.is-active {
+		background: var(--background-primary);
+		color: var(--text-normal);
+		font-weight: var(--font-semibold);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 	}
 }
 
 .bimo_settings-pane {
 	display: none;
-}
 
-.bimo_settings-pane--active {
-	display: block;
-	animation: bimo-settings-pane-in 0.18s ease-out;
-}
-
-@keyframes bimo-settings-pane-in {
-	from { opacity: 0; transform: translateY(4px); }
-	to { opacity: 1; transform: translateY(0); }
-}
-
-.bimo_settings-pane > hr {
-	display: none;
-}
-
-.bimo_settings-pane__intro {
-	margin: 0 0 1.2em;
-	font-size: 0.85em;
-	line-height: 1.55;
-	color: var(--text-muted);
-	max-width: 48em;
-}
-
-.bimo_settings-pane__note {
-	margin: 1.2em 0;
-	font-size: 0.82em;
-	line-height: 1.5;
-	color: var(--text-faint);
-}
-
-.bimo_settings-card {
-	margin: 1.2em 0;
-	padding: 1.2em 1.35em;
-	border-radius: var(--radius-l);
-	background: color-mix(in srgb, var(--background-secondary) 85%, transparent);
-	border: 1px solid var(--background-modifier-border);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-
-	h4 {
-		margin-top: 0;
-		margin-bottom: 0.4em;
-		font-size: 1.05em;
-		font-weight: 600;
-		color: var(--text-normal);
-	}
-
-	.setting-item-description {
-		margin-bottom: 0.9em;
-		color: var(--text-muted);
-		font-size: 0.88em;
-		line-height: 1.5;
-	}
-
-	.setting-item {
-		border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
-		padding: 0.75em 0;
-
-		&:first-of-type {
-			border-top: none;
-		}
+	&--active {
+		display: block;
 	}
 }
 
-/* Swatches for NoteInk */
+/* 笔色快捷色板 — 靠右对齐于设置控件区 */
 .bimo_settings-swatches {
 	display: flex;
 	align-items: center;
-	gap: 0.45em;
+	gap: 6px;
 	flex-wrap: wrap;
 }
 
 .bimo_settings-swatch {
-	width: 24px;
-	height: 24px;
+	width: 22px;
+	height: 22px;
 	border-radius: 50%;
 	border: 2px solid transparent;
 	padding: 0;
@@ -314,7 +75,82 @@ input.ddc_ink_line-height-input {
 
 	&.is-active {
 		border-color: var(--interactive-accent);
-		transform: scale(1.12);
+		transform: scale(1.1);
 		box-shadow: 0 0 0 2px var(--background-primary);
+	}
+}
+
+/* 行高输入框 */
+input.ddc_ink_line-height-input {
+	width: 4.5em;
+	text-align: center;
+}
+
+/* 笔压/平滑输入检测说明 */
+.ddc_ink_stroke-input-detected-paragraph {
+	margin: 0.4em 0 0.15em;
+	font-size: 0.88em;
+	line-height: 1.45;
+	color: var(--text-muted);
+}
+
+.ddc_ink_stroke-input-detected-value {
+	color: var(--text-normal);
+	font-weight: 600;
+}
+
+.bimo_settings-note {
+	margin: 1.5em 0 0.5em;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	line-height: 1.5;
+}
+
+.ddc_ink_button-set {
+	flex-wrap: wrap;
+	row-gap: 0.5em;
+
+	.setting-item-info {
+		width: 100%;
+	}
+
+	.setting-item-control {
+		gap: 2px;
+		flex-wrap: wrap;
+		padding-bottom: 0.9em;
+
+		button {
+			flex-grow: 1;
+			flex-shrink: 1;
+		}
+
+		.ddc_ink_middle {
+			border-top-left-radius: 0;
+			border-bottom-left-radius: 0;
+			border-top-right-radius: 0;
+			border-bottom-right-radius: 0;
+		}
+
+		.ddc_ink_left-most {
+			border-top-right-radius: 0;
+			border-bottom-right-radius: 0;
+		}
+		.ddc_ink_right-most {
+			border-top-left-radius: 0;
+			border-bottom-left-radius: 0;
+		}
+
+		.mod-cta:disabled {
+			box-shadow: inset 1px 1px 3px 0.5px rgba(0, 0, 0, 0.6);
+			pointer-events: none;
+		}
+	}
+}
+
+.ddc_ink_input-medium {
+	.setting-item-control {
+		input {
+			width: 100%;
+		}
 	}
 }

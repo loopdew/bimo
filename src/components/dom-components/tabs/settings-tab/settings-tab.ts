@@ -102,21 +102,25 @@ export class MySettingsTab extends PluginSettingTab {
 		containerEl.empty();
 		containerEl.addClass('bimo_settings');
 
-		// ── 顶部品牌头 + 分区导航 ─────────────────────────────
-		this.renderBrandHeader(containerEl);
+		// ── 顶部标题（纯原生 Obsidian Heading） ──
+		const provider = this.plugin.settings.customTranscriptionProvider;
+		const connected = Boolean(provider?.enabled && provider.apiKey && provider.model);
+		new Setting(containerEl)
+			.setName('笔墨')
+			.setDesc(
+				t('Hand write or draw directly between paragraphs in your notes.')
+				+ ` (v${this.plugin.manifest.version} · ${connected ? t('Model connected') : t('No model configured')})`
+			)
+			.setHeading();
 
-		const navEl = containerEl.createDiv('bimo_settings-nav');
+		// ── 原生风格分段标签栏 ──
+		const navEl = containerEl.createDiv('bimo_settings-tabs');
 		const panesEl = containerEl.createDiv('bimo_settings-panes');
-		const pane = (intro: string): HTMLElement => {
-			const el = panesEl.createDiv('bimo_settings-pane');
-			el.createEl('p', { cls: 'bimo_settings-pane__intro', text: t(intro) });
-			return el;
-		};
 		const panes: Record<SettingsPaneId, HTMLElement> = {
-			noteink: pane('Draw straight onto a note, over the text, without changing a byte of the Markdown file.'),
-			embeds: pane('Inline handwriting and drawing canvases embedded directly between note paragraphs.'),
-			ai: pane('Where the model lives. Powers transcription, Magic Diary Pages, and magic margins.'),
-			device: pane('Stylus behavior, display modes, and vault attachment storage.'),
+			noteink: panesEl.createDiv('bimo_settings-pane'),
+			embeds: panesEl.createDiv('bimo_settings-pane'),
+			ai: panesEl.createDiv('bimo_settings-pane'),
+			device: panesEl.createDiv('bimo_settings-pane'),
 		};
 
 		const navButtons: Record<string, HTMLButtonElement> = {};
@@ -126,21 +130,21 @@ export class MySettingsTab extends PluginSettingTab {
 				el.toggleClass('bimo_settings-pane--active', paneId === id);
 			}
 			for (const [paneId, button] of Object.entries(navButtons)) {
-				button.toggleClass('bimo_settings-nav__item--active', paneId === id);
+				button.toggleClass('is-active', paneId === id);
 			}
 			containerEl.closest('.vertical-tab-content')?.scrollTo({ top: 0 });
 		};
 
 		for (const item of SETTINGS_PANE_ITEMS) {
 			const button = navEl.createEl('button', {
-				cls: 'bimo_settings-nav__item',
+				cls: 'bimo_settings-tab-button',
 				text: t(item.label),
 			});
 			button.addEventListener('click', () => activate(item.id));
 			navButtons[item.id] = button;
 		}
 
-		// ── 各分区渲染 ────────────────────────────────────────
+		// ── 各分类渲染（完全符合 Obsidian 原生设置规范） ──
 		this.renderNoteInkSettings(panes.noteink);
 		this.renderEmbedsSettings(panes.embeds);
 		this.renderAiSettings(panes.ai);
@@ -173,11 +177,12 @@ export class MySettingsTab extends PluginSettingTab {
 	private renderNoteInkSettings(container: HTMLElement): void {
 		const plugin = this.plugin;
 
-		// ── 笔记手写基础 ──
-		const baseCard = container.createDiv('bimo_settings-card');
-		baseCard.createEl('h4', { text: t('Writing on notes') });
+		new Setting(container)
+			.setName(t('Writing on notes'))
+			.setDesc(t('Draw straight onto a note, over the text, without changing a byte of the Markdown file.'))
+			.setHeading();
 
-		new Setting(baseCard)
+		new Setting(container)
 			.setName(t('Draw on notes'))
 			.setDesc(t('Puts a transparent ink layer over every Markdown editor. It ignores the pointer until you pick a drawing tool, so normal editing is unaffected.'))
 			.addToggle((toggle) => toggle
@@ -188,7 +193,7 @@ export class MySettingsTab extends PluginSettingTab {
 					await plugin.saveSettings();
 				}));
 
-		new Setting(baseCard)
+		new Setting(container)
 			.setName(t('Brush'))
 			.setDesc(t('Applies to new strokes on notes. Existing strokes keep the brush they were drawn with.'))
 			.addDropdown((dropdown) => {
@@ -204,7 +209,7 @@ export class MySettingsTab extends PluginSettingTab {
 					});
 			});
 
-		new Setting(baseCard)
+		new Setting(container)
 			.setName(t('Stroke size'))
 			.setDesc(t('The brush multiplies this, so a highlighter stays wide even at the same number.'))
 			.addSlider((slider: SliderComponent) => slider
@@ -217,7 +222,7 @@ export class MySettingsTab extends PluginSettingTab {
 					await plugin.saveSettings();
 				}));
 
-		const colourSetting = new Setting(baseCard)
+		const colourSetting = new Setting(container)
 			.setName(t('Colour'))
 			.setDesc(t('“Theme ink” follows light and dark mode. The highlighter falls back to yellow when this is left on theme ink.'));
 		const swatches = colourSetting.controlEl.createDiv('bimo_settings-swatches');
@@ -240,48 +245,7 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 		}
 
-		// ── 橡皮与智能辅助 ──
-		const helperCard = container.createDiv('bimo_settings-card');
-		helperCard.createEl('h4', { text: t('Eraser') });
-
-		new Setting(helperCard)
-			.setName(t('Eraser mode'))
-			.setDesc(t('Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.'))
-			.addDropdown((dropdown) => dropdown
-				.addOption('stroke', t('Object eraser'))
-				.addOption('pixel', t('Partial eraser'))
-				.setValue(plugin.settings.mdInkEraserMode)
-				.onChange(async (value) => {
-					plugin.settings.mdInkEraserMode = value as 'stroke' | 'pixel';
-					plugin.mdInk.refreshOptions({ eraserMode: plugin.settings.mdInkEraserMode });
-					await plugin.saveSettings();
-				}));
-
-		new Setting(helperCard)
-			.setName(t('Eraser radius'))
-			.setDesc(t('How close the eraser has to come to a stroke, in pixels. Larger is forgiving on a tablet, clumsy with a mouse.'))
-			.addSlider((slider: SliderComponent) => slider
-				.setLimits(6, 40, 2)
-				.setValue(plugin.settings.mdInkEraserRadius)
-				.setDynamicTooltip()
-				.onChange(async (value) => {
-					plugin.settings.mdInkEraserRadius = value;
-					plugin.mdInk.refreshOptions({ eraserRadius: value });
-					await plugin.saveSettings();
-				}));
-
-		new Setting(helperCard)
-			.setName(t('Straighten shapes'))
-			.setDesc(t('A stroke that was nearly a line becomes a line; one that was nearly a closed box becomes a rectangle. Hand-drawn underlines and frames stop looking wobbly.'))
-			.addToggle((toggle) => toggle
-				.setValue(plugin.settings.mdInkShapeSnap)
-				.onChange(async (value) => {
-					plugin.settings.mdInkShapeSnap = value;
-					plugin.mdInk.refreshOptions({ shapeSnap: value });
-					await plugin.saveSettings();
-				}));
-
-		new Setting(helperCard)
+		new Setting(container)
 			.setName(t('Paper'))
 			.setDesc(t('A guide drawn under the ink for this note. It is decoration only — it never enters the Markdown file.'))
 			.addDropdown((dropdown) => dropdown
@@ -296,7 +260,49 @@ export class MySettingsTab extends PluginSettingTab {
 					await plugin.saveSettings();
 				}));
 
-		new Setting(helperCard)
+		new Setting(container)
+			.setName(t('Straighten shapes'))
+			.setDesc(t('A stroke that was nearly a line becomes a line; one that was nearly a closed box becomes a rectangle. Hand-drawn underlines and frames stop looking wobbly.'))
+			.addToggle((toggle) => toggle
+				.setValue(plugin.settings.mdInkShapeSnap)
+				.onChange(async (value) => {
+					plugin.settings.mdInkShapeSnap = value;
+					plugin.mdInk.refreshOptions({ shapeSnap: value });
+					await plugin.saveSettings();
+				}));
+
+		// ── 橡皮与触控 ──
+		new Setting(container)
+			.setName(t('Eraser'))
+			.setHeading();
+
+		new Setting(container)
+			.setName(t('Eraser mode'))
+			.setDesc(t('Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.'))
+			.addDropdown((dropdown) => dropdown
+				.addOption('stroke', t('Object eraser'))
+				.addOption('pixel', t('Partial eraser'))
+				.setValue(plugin.settings.mdInkEraserMode)
+				.onChange(async (value) => {
+					plugin.settings.mdInkEraserMode = value as 'stroke' | 'pixel';
+					plugin.mdInk.refreshOptions({ eraserMode: plugin.settings.mdInkEraserMode });
+					await plugin.saveSettings();
+				}));
+
+		new Setting(container)
+			.setName(t('Eraser radius'))
+			.setDesc(t('How close the eraser has to come to a stroke, in pixels. Larger is forgiving on a tablet, clumsy with a mouse.'))
+			.addSlider((slider: SliderComponent) => slider
+				.setLimits(6, 40, 2)
+				.setValue(plugin.settings.mdInkEraserRadius)
+				.setDynamicTooltip()
+				.onChange(async (value) => {
+					plugin.settings.mdInkEraserRadius = value;
+					plugin.mdInk.refreshOptions({ eraserRadius: value });
+					await plugin.saveSettings();
+				}));
+
+		new Setting(container)
 			.setName(t('Draw with a mouse'))
 			.setDesc(t('Off by default: a pen draws, a mouse keeps selecting text. Turn this on if you have no stylus.'))
 			.addToggle((toggle) => toggle
@@ -307,7 +313,7 @@ export class MySettingsTab extends PluginSettingTab {
 					await plugin.saveSettings();
 				}));
 
-		new Setting(helperCard)
+		new Setting(container)
 			.setName(t('Draw with a finger'))
 			.setDesc(t('Off by default on tablets: a finger scrolls the note and the stylus draws. Turn this on if you have no stylus at all.'))
 			.addToggle((toggle) => toggle
@@ -319,14 +325,12 @@ export class MySettingsTab extends PluginSettingTab {
 				}));
 
 		// ── 魔法书页 ──
-		const magicCard = container.createDiv('bimo_settings-card');
-		magicCard.createEl('h4', { text: `✦ ${t('Magic Diary Page')}` });
-		magicCard.createEl('p', {
-			cls: 'setting-item-description',
-			text: t('You write a line, AI writes a line. Inspired by magical parchment and enchanted diaries. Choose from preset response styles or tailor your own system prompt.'),
-		});
+		new Setting(container)
+			.setName(`✦ ${t('Magic Diary Page')}`)
+			.setDesc(t('You write a line, AI writes a line. Inspired by magical parchment and enchanted diaries. Choose from preset response styles or tailor your own system prompt.'))
+			.setHeading();
 
-		new Setting(magicCard)
+		new Setting(container)
 			.setName(t('Response style'))
 			.setDesc(t('Choose the persona and purpose of the Magic Diary Page.'))
 			.addDropdown((dropdown) => {
@@ -342,11 +346,11 @@ export class MySettingsTab extends PluginSettingTab {
 						plugin.mdInk.refreshOptions({ magicPreset: plugin.settings.magicDiaryPreset });
 						await plugin.saveSettings();
 						promptSetting.settingEl.style.display =
-							plugin.settings.magicDiaryPreset === 'custom' ? 'block' : 'none';
+							plugin.settings.magicDiaryPreset === 'custom' ? 'flex' : 'none';
 					});
 			});
 
-		const promptSetting = new Setting(magicCard)
+		const promptSetting = new Setting(container)
 			.setName(t('Custom prompt'))
 			.setDesc(t('System prompt given to the AI when reading your handwriting on Magic Diary Pages.'))
 			.addTextArea((text) => {
@@ -363,10 +367,10 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 
 		promptSetting.settingEl.style.display =
-			plugin.settings.magicDiaryPreset === 'custom' ? 'block' : 'none';
+			plugin.settings.magicDiaryPreset === 'custom' ? 'flex' : 'none';
 
 		container.createEl('p', {
-			cls: 'bimo_settings-pane__note',
+			cls: 'bimo_settings-note',
 			text: t('Shortcuts: Mod+Shift+D switches the pen on and off for a note. While the pen is on, Mod+Alt+Z undoes a stroke. Long-press the space bar to pan.'),
 		});
 	}
@@ -378,15 +382,12 @@ export class MySettingsTab extends PluginSettingTab {
 		const plugin = this.plugin;
 
 		// ── 嵌入手写块 ──
-		const writingCard = container.createDiv('bimo_settings-card');
-		writingCard.createEl('h4', { text: t('Handwriting embeds') });
-		writingCard.createEl('p', {
-			cls: 'setting-item-description',
-			text: t("While editing a Markdown file, run the action 'new handwriting section' to embed a section for writing with a pen."),
-		});
+		new Setting(container)
+			.setName(t('Handwriting embeds'))
+			.setDesc(t("While editing a Markdown file, run the action 'new handwriting section' to embed a section for writing with a pen."))
+			.setHeading();
 
-		new Setting(writingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Enable writing'))
 			.setDesc(t('If disabled, you will not be able to add new writing embeds and those already embedded will appear as raw code. Existing writing files will be hidden in Obsidian but still exist on disk. Changing this setting will require a restart of Obsidian to take effect.'))
 			.addToggle((toggle) => {
@@ -407,8 +408,7 @@ export class MySettingsTab extends PluginSettingTab {
 			lineHeightTextComponent?.setValue(clampedValue.toString());
 		};
 
-		new Setting(writingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Line height'))
 			.setDesc(t('Height in pixels of each ruled line. Only affects new writing embeds.'))
 			.addSlider((slider) => {
@@ -441,8 +441,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(writingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Buffer lines when editing'))
 			.setDesc(t('Number of empty lines shown below your writing while editing. Writing reaches the last line before the embed extends in height.'))
 			.addText((textItem) => {
@@ -462,8 +461,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(writingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Show ruled lines when not editing'))
 			.addToggle((toggle) => {
 				toggle.setValue(plugin.settings.writingLinesWhenLocked);
@@ -473,8 +471,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(writingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Show background when not editing'))
 			.addToggle((toggle) => {
 				toggle.setValue(plugin.settings.writingBackgroundWhenLocked);
@@ -484,18 +481,15 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		this.strokeInputToggles.push(insertStrokeInputTreatAsSetting(writingCard, 'inkWriting'));
+		this.strokeInputToggles.push(insertStrokeInputTreatAsSetting(container, 'inkWriting'));
 
 		// ── 嵌入绘图画板 ──
-		const drawingCard = container.createDiv('bimo_settings-card');
-		drawingCard.createEl('h4', { text: t('Drawing canvas embeds') });
-		drawingCard.createEl('p', {
-			cls: 'setting-item-description',
-			text: t("While editing a Markdown file, run the action 'insert new hand drawn section' to embed a drawing canvas."),
-		});
+		new Setting(container)
+			.setName(t('Drawing canvas embeds'))
+			.setDesc(t("While editing a Markdown file, run the action 'insert new hand drawn section' to embed a drawing canvas."))
+			.setHeading();
 
-		new Setting(drawingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Enable drawing'))
 			.setDesc(t('If disabled, you will not be able to add new drawing embeds and those already embedded will appear as raw code. Existing drawing files will be hidden in Obsidian but still exist on disk. Changing this setting will require a restart of Obsidian to take effect.'))
 			.addToggle((toggle) => {
@@ -506,8 +500,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(drawingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Show grid in new drawings'))
 			.addToggle((toggle) => {
 				toggle.setValue(plugin.settings.drawingGridEnabledByDefault);
@@ -517,8 +510,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(drawingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Show frame around drawing when not editing'))
 			.addToggle((toggle) => {
 				toggle.setValue(plugin.settings.drawingFrameWhenLocked);
@@ -528,8 +520,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(drawingCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Show background when not editing'))
 			.addToggle((toggle) => {
 				toggle.setValue(plugin.settings.drawingBackgroundWhenLocked);
@@ -539,15 +530,15 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		this.strokeInputToggles.push(insertStrokeInputTreatAsSetting(drawingCard, 'inkDrawing'));
+		this.strokeInputToggles.push(insertStrokeInputTreatAsSetting(container, 'inkDrawing'));
 
 		// ── 智能转录与镜像 ──
-		const transcriptionCard = container.createDiv('bimo_settings-card');
-		transcriptionCard.createEl('h4', { text: t('Automatic transcription') });
+		new Setting(container)
+			.setName(t('Automatic transcription'))
+			.setHeading();
 
 		let setWritingThresholdVisible = (_visible: boolean) => {};
-		new Setting(transcriptionCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Automatically transcribe writing'))
 			.setDesc(autoTranscribeOnCloseSettingDesc('inkWriting', isCustomTranscriptionProviderUsable(plugin.settings.customTranscriptionProvider)))
 			.addToggle((toggle) => {
@@ -563,15 +554,14 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 
 		setWritingThresholdVisible = insertAutoTranscribeChangeThresholdSetting(
-			transcriptionCard,
+			container,
 			plugin,
 			'inkWriting',
 			plugin.settings.writingAutoTranscribeOnClose,
 		);
 
 		let setDrawingThresholdVisible = (_visible: boolean) => {};
-		new Setting(transcriptionCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Automatically transcribe drawings'))
 			.setDesc(autoTranscribeOnCloseSettingDesc('inkDrawing', isCustomTranscriptionProviderUsable(plugin.settings.customTranscriptionProvider)))
 			.addToggle((toggle) => {
@@ -587,14 +577,13 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 
 		setDrawingThresholdVisible = insertAutoTranscribeChangeThresholdSetting(
-			transcriptionCard,
+			container,
 			plugin,
 			'inkDrawing',
 			plugin.settings.drawingAutoTranscribeOnClose,
 		);
 
-		new Setting(transcriptionCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Mirror transcript below the embed'))
 			.setDesc(t('After transcribing, write the text into a collapsed callout directly under the handwriting block. Applies to writing and drawing. Surrounding prose is never touched, and deleting the block stops the mirror.'))
 			.addToggle((toggle) => {
@@ -605,8 +594,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(transcriptionCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('AI caption in the embed alt'))
 			.setDesc(t('After transcribing, ask the same endpoint for a one-line caption and use it as the image alt text. Costs one extra request per page. Falls back to the transcript automatically when the model is unavailable.'))
 			.addToggle((toggle) => {
@@ -618,14 +606,12 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 
 		// ── 魔法页边 ──
-		const magicMarginCard = container.createDiv('bimo_settings-card');
-		magicMarginCard.createEl('h4', { text: `✦ ${t('Magic margin (auto reply)')}` });
-		magicMarginCard.createEl('p', {
-			cls: 'setting-item-description',
-			text: t('Turn it on with the ✦ button in the writing toolbar. Pause, and the reply writes itself into the corner.'),
-		});
+		new Setting(container)
+			.setName(`✦ ${t('Magic margin (auto reply)')}`)
+			.setDesc(t('Turn it on with the ✦ button in the writing toolbar. Pause, and the reply writes itself into the corner.'))
+			.setHeading();
 
-		new Setting(magicMarginCard)
+		new Setting(container)
 			.setName(t('Pause before replying'))
 			.setDesc(t('How long the pen must be still. A short pause interrupts a thought; a long one feels like nothing happened.'))
 			.addSlider((slider) => slider
@@ -637,7 +623,7 @@ export class MySettingsTab extends PluginSettingTab {
 					await plugin.saveSettings();
 				}));
 
-		new Setting(magicMarginCard)
+		new Setting(container)
 			.setName(t('Minimum new strokes'))
 			.setDesc(t('A dot or a comma is not worth a request. Counts strokes written since the last reply.'))
 			.addSlider((slider) => slider
@@ -654,10 +640,11 @@ export class MySettingsTab extends PluginSettingTab {
 	 * Settings for AI model and language.
 	 */
 	private renderAiSettings(container: HTMLElement): void {
-		const langCard = container.createDiv('bimo_settings-card');
-		langCard.createEl('h4', { text: t('Interface language') });
+		new Setting(container)
+			.setName(t('Interface language'))
+			.setHeading();
 
-		new Setting(langCard)
+		new Setting(container)
 			.setName(t('Interface language'))
 			.setDesc(t('Auto follows Obsidian. The change applies immediately.'))
 			.addDropdown((dropdown) => dropdown
@@ -685,10 +672,11 @@ export class MySettingsTab extends PluginSettingTab {
 		const plugin = this.plugin;
 
 		// ── 手写笔与交互 ──
-		const stylusCard = container.createDiv('bimo_settings-card');
-		stylusCard.createEl('h4', { text: t('Stylus & input') });
+		new Setting(container)
+			.setName(t('Stylus & input'))
+			.setHeading();
 
-		new TwoWayToggleSetting<DominantHand>(stylusCard)
+		new TwoWayToggleSetting<DominantHand>(container)
 			.setName(t('Dominant hand'))
 			.setDesc(t('Which side undo/redo and extend controls appear on while editing.'))
 			.setOptionPair('left', t('Left'), 'right', t('Right'))
@@ -699,8 +687,7 @@ export class MySettingsTab extends PluginSettingTab {
 				await plugin.saveSettings();
 			});
 
-		new Setting(stylusCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Side button temporary eraser'))
 			.setDesc(t('While held, the pen barrel button (button 2) erases instead of panning. May conflict with right-click pan on some setups.'))
 			.addToggle((toggle) => {
@@ -711,8 +698,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(stylusCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Enable finger drawing'))
 			.setDesc(t('Shows a toolbar toggle while editing so you can draw with your finger on touch devices. When off, fingers scroll the note as usual.'))
 			.addToggle((toggle) => {
@@ -723,8 +709,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(stylusCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('High contrast user interface'))
 			.setDesc(t('Uses high-contrast borders and controls across 笔墨 embeds and editors — suited to e-ink and grayscale displays.'))
 			.addToggle((toggle) => {
@@ -736,8 +721,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(stylusCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Enable Boox companion app'))
 			.setDesc(t('Connects to the Boox companion app for passing through smoother pen strokes on supported tablets.'))
 			.addToggle((toggle) => {
@@ -750,19 +734,21 @@ export class MySettingsTab extends PluginSettingTab {
 			});
 
 		// ── 文件与存储 ──
-		const fileCard = container.createDiv('bimo_settings-card');
-		fileCard.createEl('h4', { text: t('File locations') });
-		insertFileOrganisationSection(fileCard, plugin);
+		new Setting(container)
+			.setName(t('File locations'))
+			.setHeading();
+
+		insertFileOrganisationSection(container, plugin);
 
 		// ── PDF 批注 ──
 		insertPdfAnnotationSection(container, plugin);
 
 		// ── 维护与高级 ──
-		const maintCard = container.createDiv('bimo_settings-card');
-		maintCard.createEl('h4', { text: t('Maintenance & advanced') });
+		new Setting(container)
+			.setName(t('Maintenance & advanced'))
+			.setHeading();
 
-		new Setting(maintCard)
-			.setClass('ddc_ink_setting')
+		new Setting(container)
 			.setName(t('Enable debug logging'))
 			.setDesc(t('When enabled, debug information is written to an ink-debug.md file in your vault root. This includes writing and drawing activity, so do not enable this unless you are actively troubleshooting a bug to provide logs for a bug report. Disable it again once you\'re done.'))
 			.addToggle((toggle) => {
@@ -773,7 +759,7 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 
-		const resetSetting = new Setting(maintCard)
+		const resetSetting = new Setting(container)
 			.setName(t('Reset settings'))
 			.setDesc(t('Revert to default settings for this plugin?'))
 			.addButton((button) => {
@@ -802,29 +788,6 @@ export class MySettingsTab extends PluginSettingTab {
 				});
 			});
 		}
-	}
-
-	/** Brand row: what this is, which version, and whether it can talk to a model. */
-	private renderBrandHeader(containerEl: HTMLElement): void {
-		const header = containerEl.createDiv('bimo_settings-header');
-		const identity = header.createDiv('bimo_settings-header__identity');
-		identity.createEl('h2', { cls: 'bimo_settings-header__name', text: '笔墨' });
-		identity.createEl('span', {
-			cls: 'bimo_settings-header__tagline',
-			text: t('Hand write or draw directly between paragraphs in your notes.'),
-		});
-
-		const badges = header.createDiv('bimo_settings-header__badges');
-		badges.createSpan({
-			cls: 'bimo_settings-badge',
-			text: `v${this.plugin.manifest.version}`,
-		});
-		const provider = this.plugin.settings.customTranscriptionProvider;
-		const connected = Boolean(provider?.enabled && provider.apiKey && provider.model);
-		badges.createSpan({
-			cls: `bimo_settings-badge ${connected ? 'bimo_settings-badge--ok' : 'bimo_settings-badge--idle'}`,
-			text: connected ? t('Model connected') : t('No model configured'),
-		});
 	}
 
 	hide(): void {
@@ -1071,14 +1034,12 @@ function insertAutoTranscribeChangeThresholdSetting(
  * PDF annotation settings card.
  */
 function insertPdfAnnotationSection(containerEl: HTMLElement, plugin: InkPlugin): void {
-	const pdfCard = containerEl.createDiv('bimo_settings-card');
-	pdfCard.createEl('h4', { text: t('PDF annotation') });
-	pdfCard.createEl('p', {
-		cls: 'setting-item-description',
-		text: t('Annotating a PDF turns its pages into handwriting blocks. These settings decide where those blocks land.'),
-	});
+	new Setting(containerEl)
+		.setName(t('PDF annotation'))
+		.setDesc(t('Annotating a PDF turns its pages into handwriting blocks. These settings decide where those blocks land.'))
+		.setHeading();
 
-	new Setting(pdfCard)
+	new Setting(containerEl)
 		.setName(t('Where annotations go'))
 		.addDropdown((dropdown) => dropdown
 			.addOption('auto-create', t('Create a note beside the PDF'))
@@ -1089,7 +1050,7 @@ function insertPdfAnnotationSection(containerEl: HTMLElement, plugin: InkPlugin)
 				await plugin.saveSettings();
 			}));
 
-	new Setting(pdfCard)
+	new Setting(containerEl)
 		.setName(t('New note name'))
 		.setDesc(t('{pdf} becomes the PDF name, {date} becomes today. A note that already exists is reused, not duplicated.'))
 		.addText((text) => text
@@ -1101,7 +1062,7 @@ function insertPdfAnnotationSection(containerEl: HTMLElement, plugin: InkPlugin)
 				await plugin.saveSettings();
 			}));
 
-	new Setting(pdfCard)
+	new Setting(containerEl)
 		.setName(t('Note to use'))
 		.setDesc(t('Vault path of the shared note, e.g. “03-Maps/物理批注”. Created on first use if missing.'))
 		.addText((text) => text
@@ -1112,7 +1073,7 @@ function insertPdfAnnotationSection(containerEl: HTMLElement, plugin: InkPlugin)
 				await plugin.saveSettings();
 			}));
 
-	new Setting(pdfCard)
+	new Setting(containerEl)
 		.setName(t('After inserting'))
 		.addDropdown((dropdown) => dropdown
 			.addOption('foreground', t('Open the note'))

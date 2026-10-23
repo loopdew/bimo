@@ -42,15 +42,14 @@ export function insertCustomApiSection(
 	const saveSoon = debouncedSaver(plugin);
 
 	const root = containerEl.createDiv('ink-custom-api-section');
-	root.createEl('h3', { text: t('Transcription API') });
-	root.createEl('p', {
-		text: t(
+	new Setting(root)
+		.setName(t('Transcription API'))
+		.setDesc(t(
 			'Handwriting transcription runs on your own endpoint — the plugin ships no backend. '
 			+ 'Works with OpenAI, Azure OpenAI, DeepSeek, SiliconFlow, Gemini, Moonshot, Ollama, vLLM, '
 			+ 'LM Studio, one-api / new-api gateways, and anything else that speaks one of the two formats below.',
-		),
-		cls: 'setting-item-description',
-	});
+		))
+		.setHeading();
 
 	new Setting(root)
 		.setName(t('Enable transcription'))
