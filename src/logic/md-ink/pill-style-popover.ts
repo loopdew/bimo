@@ -9,12 +9,28 @@ import {
 } from 'src/ink-canvas/brush-presets';
 import type { MdInkEraserMode, MdInkPaper } from './types';
 
+export const INK_ERASER_RADIUS_STEPS = [8, 14, 24, 38] as const;
+
+export function nearestEraserRadiusStep(radius: number): number {
+	let nearest: number = INK_ERASER_RADIUS_STEPS[0];
+	let minDiff = Math.abs(radius - nearest);
+	for (const step of INK_ERASER_RADIUS_STEPS) {
+		const diff = Math.abs(radius - step);
+		if (diff < minDiff) {
+			minDiff = diff;
+			nearest = step;
+		}
+	}
+	return nearest;
+}
+
 export interface PillStyleState {
 	brush: InkBrushKind;
 	colour: string;
 	size: number;
 	paper?: MdInkPaper;
 	eraserMode?: MdInkEraserMode;
+	eraserRadius?: number;
 	fingerDraws?: boolean;
 }
 
@@ -24,6 +40,7 @@ export interface PillStylePatch {
 	size?: number;
 	paper?: MdInkPaper;
 	eraserMode?: MdInkEraserMode;
+	eraserRadius?: number;
 	fingerDraws?: boolean;
 }
 
@@ -38,6 +55,7 @@ export interface PillStylePopoverHandle {
 	readonly button: HTMLButtonElement;
 	readonly popover: HTMLElement;
 	sync(): void;
+	open(): void;
 	close(): void;
 	destroy(): void;
 }
@@ -218,7 +236,40 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 	eraserSection.append(eraserLabel, eraserRow);
 	popover.appendChild(eraserSection);
 
-	// 6. Touch input / Finger drawing quick toggle (for phones & tablets)
+	// 6. Eraser radius / size
+	const eraserSizeSection = document.createElement('div');
+	eraserSizeSection.className = 'bimo-md-ink-popover__section';
+	const eraserSizeLabel = document.createElement('div');
+	eraserSizeLabel.className = 'bimo-md-ink-popover__label';
+	eraserSizeLabel.textContent = t('Eraser size');
+	const eraserSizeRow = document.createElement('div');
+	eraserSizeRow.className = 'bimo-md-ink-popover__sizes';
+
+	const eraserDotDiameters = [6, 10, 15, 21];
+	INK_ERASER_RADIUS_STEPS.forEach((step, idx) => {
+		const sizeBtn = document.createElement('button');
+		sizeBtn.type = 'button';
+		sizeBtn.className = 'bimo-md-ink-popover__size bimo-md-ink-popover__eraser-size';
+		sizeBtn.dataset.mdInkEraserRadius = String(step);
+		sizeBtn.title = `${t('Eraser size')}: ${step}px`;
+		const dot = document.createElement('span');
+		dot.className = 'bimo-md-ink-popover__size-dot';
+		const px = eraserDotDiameters[idx] ?? 10;
+		dot.style.width = `${px}px`;
+		dot.style.height = `${px}px`;
+		sizeBtn.appendChild(dot);
+		sizeBtn.addEventListener('click', (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			onChange({ eraserRadius: step });
+			sync();
+		});
+		eraserSizeRow.appendChild(sizeBtn);
+	});
+	eraserSizeSection.append(eraserSizeLabel, eraserSizeRow);
+	popover.appendChild(eraserSizeSection);
+
+	// 7. Touch input / Finger drawing quick toggle (for phones & tablets)
 	const touchSection = document.createElement('div');
 	touchSection.className = 'bimo-md-ink-popover__section bimo-md-ink-popover__section--inline';
 	const fingerChip = document.createElement('button');
@@ -277,6 +328,12 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 				el.classList.toggle('is-active', el.dataset.mdInkEraserMode === state.eraserMode);
 			}
 		}
+		if (state.eraserRadius !== undefined) {
+			const nearestRadius = nearestEraserRadiusStep(state.eraserRadius);
+			for (const el of Array.from(popover.querySelectorAll<HTMLButtonElement>('[data-md-ink-eraser-radius]'))) {
+				el.classList.toggle('is-active', Number(el.dataset.mdInkEraserRadius) === nearestRadius);
+			}
+		}
 		if (state.fingerDraws !== undefined) {
 			touchSection.style.display = '';
 			fingerChip.classList.toggle('is-active', Boolean(state.fingerDraws));
@@ -293,6 +350,10 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 			positionPopover();
 			sync();
 		}
+	}
+
+	function open(): void {
+		if (!isOpen) setOpen(true);
 	}
 
 	function close(): void {
@@ -331,6 +392,7 @@ export function createPillStylePopover(options: PillStylePopoverOptions): PillSt
 		button,
 		popover,
 		sync,
+		open,
 		close,
 		destroy(): void {
 			window.removeEventListener('pointerdown', onWindowPointerDown, true);

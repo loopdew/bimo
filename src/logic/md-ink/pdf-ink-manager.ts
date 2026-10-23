@@ -93,6 +93,7 @@ function createPdfPill(
 		colour: string;
 		size: number;
 		eraserMode?: 'stroke' | 'pixel';
+		eraserRadius?: number;
 		fingerDraws?: boolean;
 	},
 	onStyleChange: (patch: PillStylePatch) => void,
@@ -138,11 +139,7 @@ function createPdfPill(
 			stylePopover?.close();
 
 			if (tool === 'eraser' && getTool() === 'eraser') {
-				const currentMode = getStyleState().eraserMode ?? 'stroke';
-				const nextMode = currentMode === 'stroke' ? 'pixel' : 'stroke';
-				onStyleChange({ eraserMode: nextMode });
-				new Notice(nextMode === 'stroke' ? t('Object eraser') : t('Partial eraser'), 1200);
-				syncPill();
+				stylePopover?.open();
 				return;
 			}
 
@@ -518,6 +515,7 @@ export class PdfInkManager {
 				colour: this.plugin.settings.mdInkColour,
 				size: this.plugin.settings.mdInkSize,
 				eraserMode: this.plugin.settings.mdInkEraserMode,
+				eraserRadius: this.plugin.settings.mdInkEraserRadius,
 				fingerDraws: this.plugin.settings.mdInkFingerDraws,
 			}),
 			(patch) => {
@@ -525,6 +523,7 @@ export class PdfInkManager {
 				if (patch.colour !== undefined) this.plugin.settings.mdInkColour = patch.colour;
 				if (patch.size !== undefined) this.plugin.settings.mdInkSize = patch.size;
 				if (patch.eraserMode !== undefined) this.plugin.settings.mdInkEraserMode = patch.eraserMode;
+				if (patch.eraserRadius !== undefined) this.plugin.settings.mdInkEraserRadius = patch.eraserRadius;
 				if (patch.fingerDraws !== undefined) this.plugin.settings.mdInkFingerDraws = patch.fingerDraws;
 				this.plugin.mdInk.refreshOptions(patch);
 				void this.plugin.saveSettings();

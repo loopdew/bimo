@@ -221,6 +221,34 @@ describe('PillStylePopover fingerDraws toggle & PdfInkOverlay selection mutation
 		toggleBtn!.click();
 		expect(fingerDraws).toBe(true);
 		expect(toggleBtn!.classList.contains('is-active')).toBe(true);
+
+		// Test eraser radius adjustments in popover
+		let updatedRadius = 14;
+		const handleWithEraser = createPillStylePopover({
+			pill,
+			showPaper: true,
+			getState: () => ({
+				brush: 'pen',
+				colour: '#e5484d',
+				size: 4,
+				eraserRadius: updatedRadius,
+				eraserMode: 'stroke',
+			}),
+			onChange: (patch) => {
+				if (patch.eraserRadius !== undefined) updatedRadius = patch.eraserRadius;
+			},
+		});
+
+		const radius24Btn = handleWithEraser.popover.querySelector<HTMLButtonElement>('[data-md-ink-eraser-radius="24"]');
+		expect(radius24Btn).not.toBeNull();
+		radius24Btn!.click();
+		expect(updatedRadius).toBe(24);
+
+		// Handle exposes open() and opens popover
+		handleWithEraser.open();
+		expect(handleWithEraser.popover.style.display).toBe('');
+
+		handleWithEraser.destroy();
 		handle.destroy();
 	});
 

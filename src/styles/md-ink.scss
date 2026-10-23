@@ -277,7 +277,7 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	color: var(--text-normal);
 }
 
-.bimo-md-ink-pill button.is-active {
+.bimo-md-ink-pill button.is-active:not(.bimo-md-ink-popover__swatch):not(.bimo-md-ink-selection-bar__swatch):not(.bimo-md-ink-popover__size) {
 	background: var(--interactive-accent) !important;
 	color: var(--text-on-accent) !important;
 }
@@ -386,16 +386,23 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	z-index: 45;
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-	min-width: 210px;
-	max-width: min(260px, calc(100vw - 24px));
-	padding: 10px 12px;
+	gap: 10px;
+	min-width: 260px;
+	max-width: min(340px, calc(100vw - 24px));
+	padding: 12px 14px;
 	border-radius: 10px;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	box-shadow: var(--shadow-s);
 	cursor: default;
 	user-select: none;
+	box-sizing: border-box;
+}
+
+.bimo-md-ink-popover button {
+	width: auto;
+	height: auto;
+	min-width: 0;
 }
 
 .bimo-md-ink-popover.is-align-left {
@@ -411,7 +418,7 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 .bimo-md-ink-popover__section {
 	display: flex;
 	flex-direction: column;
-	gap: 4px;
+	gap: 5px;
 }
 
 .bimo-md-ink-popover__label {
@@ -423,65 +430,83 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 .bimo-md-ink-popover__chips {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 4px;
+	gap: 6px;
 }
 
 .bimo-md-ink-pill .bimo-md-ink-popover__chip {
-	width: auto;
-	height: auto;
-	min-width: 0;
-	padding: 3px 8px;
+	width: auto !important;
+	height: auto !important;
+	min-width: 0 !important;
+	padding: 3px 9px !important;
 	border-radius: 6px;
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
 	color: var(--text-normal);
 	font-size: var(--font-ui-smaller);
+	cursor: pointer;
 }
 
+.bimo-md-ink-pill button.bimo-md-ink-popover__chip.is-active,
 .bimo-md-ink-pill .bimo-md-ink-popover__chip.is-active {
-	background: var(--interactive-accent);
-	border-color: var(--interactive-accent);
-	color: var(--text-on-accent);
+	background: var(--interactive-accent) !important;
+	border-color: var(--interactive-accent) !important;
+	color: var(--text-on-accent) !important;
 }
 
 .bimo-md-ink-popover__swatches {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	flex-wrap: wrap;
+	gap: 8px;
 }
 
 .bimo-md-ink-pill .bimo-md-ink-popover__swatch {
-	width: 1.45em;
-	height: 1.45em;
-	min-width: 1.45em;
-	padding: 0;
-	border-radius: 50%;
+	width: 24px !important;
+	height: 24px !important;
+	min-width: 24px !important;
+	max-width: 24px !important;
+	padding: 0 !important;
+	border-radius: 50% !important;
 	border: 1px solid var(--background-modifier-border);
+	cursor: pointer;
+	transition: transform 120ms ease, box-shadow 120ms ease;
+	position: relative;
+	box-sizing: border-box;
 }
 
-.bimo-md-ink-pill .bimo-md-ink-popover__swatch.is-active {
-	outline: 2px solid var(--interactive-accent);
-	outline-offset: 2px;
+/* Selected swatch: never turn blue, maintain true swatch color with a crisp double-ring! */
+.bimo-md-ink-pill button.bimo-md-ink-popover__swatch.is-active,
+.bimo-md-ink-popover__swatch.is-active {
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent) !important;
+	transform: scale(1.15);
+	outline: none !important;
 }
 
 .bimo-md-ink-popover__sizes {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	flex-wrap: wrap;
+	gap: 8px;
 }
 
 .bimo-md-ink-pill .bimo-md-ink-popover__size {
-	width: 2em;
-	height: 2em;
-	min-width: 2em;
+	width: 34px !important;
+	height: 30px !important;
+	min-width: 34px !important;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 !important;
 	border-radius: 6px;
 	border: 1px solid var(--background-modifier-border);
 	background: var(--background-secondary);
+	cursor: pointer;
 }
 
-.bimo-md-ink-pill .bimo-md-ink-popover__size.is-active {
-	border-color: var(--interactive-accent);
-	background: var(--background-modifier-hover);
+.bimo-md-ink-pill button.bimo-md-ink-popover__size.is-active {
+	border-color: var(--interactive-accent) !important;
+	background: var(--background-modifier-hover) !important;
+	box-shadow: 0 0 0 1px var(--interactive-accent);
 }
 
 .bimo-md-ink-popover__size-dot {
@@ -845,7 +870,7 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 		padding: 4px 7px;
 		gap: 4px;
 	}
-	.bimo-md-ink-pill button {
+	.bimo-md-ink-pill > button {
 		width: 2.25em;
 		height: 2.25em;
 		min-width: 2.25em;
@@ -859,6 +884,25 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 		width: 1.55em;
 		height: 1.55em;
 		min-width: 1.55em;
+	}
+	.bimo-md-ink-popover {
+		min-width: 270px;
+		max-width: min(350px, calc(100vw - 20px));
+		padding: 14px 16px;
+		gap: 12px;
+	}
+	.bimo-md-ink-pill .bimo-md-ink-popover__swatch {
+		width: 28px !important;
+		height: 28px !important;
+		min-width: 28px !important;
+	}
+	.bimo-md-ink-pill .bimo-md-ink-popover__chip {
+		padding: 5px 12px !important;
+	}
+	.bimo-md-ink-pill .bimo-md-ink-popover__size {
+		width: 38px !important;
+		height: 34px !important;
+		min-width: 38px !important;
 	}
 }
 
@@ -879,9 +923,12 @@ body:has(.bimo-md-ink-layer[data-tool='eraser']) .cm-editor .cm-cursor {
 	border: 1px solid var(--background-modifier-border);
 	box-shadow: none;
 	cursor: pointer;
+	transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
 .bimo_settings-swatch.is-active {
-	outline: 2px solid var(--interactive-accent);
+	outline: none;
+	box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 4px var(--interactive-accent);
+	transform: scale(1.12);
 	outline-offset: 2px;
 }

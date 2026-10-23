@@ -730,6 +730,7 @@ export const ZH_CN: Record<string, string> = {
 
 	// ── 橡皮模式与魔法书页增强 ─────────────────────────────
 	'Eraser mode': '橡皮擦除模式',
+	'Eraser size': '橡皮大小',
 	'Object eraser removes the entire stroke on touch; Partial eraser precisely cuts through strokes at hit points.':
 		'整笔擦除触碰笔画任意处即删除整笔；局部/像素擦除可在触碰点精准截断笔画。',
 	'Object eraser': '整笔擦除',

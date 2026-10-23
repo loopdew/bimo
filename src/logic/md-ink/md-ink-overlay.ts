@@ -563,16 +563,12 @@ export class MdInkOverlay {
 				this.stylePopover?.close();
 
 				if (tool === 'eraser' && this.getTool() === 'eraser') {
-					// Toggle between 'stroke' and 'pixel' mode directly from toolbar!
-					const nextMode = (this.options.eraserMode ?? 'stroke') === 'stroke' ? 'pixel' : 'stroke';
-					this.options.eraserMode = nextMode;
-					this.options.onStyleChange?.({ eraserMode: nextMode });
-					this.syncEraserButton(button);
-					this.stylePopover?.sync();
-					new Notice(nextMode === 'stroke' ? t('Object eraser') : t('Partial eraser'), 1200);
+					// Clicking eraser while already in eraser mode opens the style popover to adjust radius & mode!
+					this.stylePopover?.open();
 					return;
 				}
 
+				this.stylePopover?.close();
 				this.options.onToolSelected?.(tool);
 				this.setTool(tool);
 			});
@@ -588,6 +584,7 @@ export class MdInkOverlay {
 				size: this.options.size,
 				paper: this.options.paper,
 				eraserMode: this.options.eraserMode ?? 'stroke',
+				eraserRadius: this.options.eraserRadius,
 				fingerDraws: this.options.fingerDraws,
 			}),
 			onChange: (patch) => {
@@ -596,12 +593,18 @@ export class MdInkOverlay {
 				}
 				if (patch.eraserMode !== undefined) {
 					this.options.eraserMode = patch.eraserMode;
+					const eraserBtn = this.pill.querySelector<HTMLButtonElement>('button[data-md-ink-tool="eraser"]');
+					if (eraserBtn) this.syncEraserButton(eraserBtn);
+				}
+				if (patch.eraserRadius !== undefined) {
+					this.options.eraserRadius = patch.eraserRadius;
 				}
 				if (
 					patch.brush !== undefined
 					|| patch.colour !== undefined
 					|| patch.size !== undefined
 					|| patch.eraserMode !== undefined
+					|| patch.eraserRadius !== undefined
 					|| patch.fingerDraws !== undefined
 				) {
 					this.setOptions(patch);
